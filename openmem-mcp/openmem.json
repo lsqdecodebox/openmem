@@ -1,0 +1,15 @@
+{
+  "wiki_root": "./wikitest0525",
+  "max_depth": 7,
+  "default_tags": [],
+  "llm": {
+    "base_url": "https://aigate.catl.com/v1",
+    "api_key": "sk-hGwWvJQHzsQUO3637yVWpslEHEtcbzQgMlB8fO8g5NpLx1Td",
+    "small_model": "MiniMax-M2.7",
+    "large_model": "MiniMax-M2.7",
+    "timeout": 30
+  },
+  "logging": {
+    "level": "INFO"
+  }
+}

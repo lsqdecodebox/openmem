@@ -1,0 +1,15 @@
+{
+  "wiki_root": "./wiki",
+  "max_depth": 7,
+  "default_tags": [],
+  "llm": {
+    "base_url": "https://api.openai.com/v1",
+    "api_key": "your-api-key-here",
+    "small_model": "gpt-4o-mini",
+    "large_model": "gpt-4o",
+    "timeout": 30
+  },
+  "logging": {
+    "level": "INFO"
+  }
+}
