@@ -9,12 +9,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from config import Config
-from file_store import FileStore
-from llm_client import LLMClient
-from write_engine import WriteEngine
-from read_engine import ReadEngine
-from health_engine import HealthEngine
+from openmem.config import Config
+from openmem.file_store import FileStore
+from openmem.llm_client import LLMClient
+from openmem.write_engine import WriteEngine
+from openmem.read_engine import ReadEngine
+from openmem.health_engine import HealthEngine
 
 
 # ---------------------------------------------------------------------------
@@ -52,13 +52,7 @@ def config_file(tmp_path: Path, minimal_config_dict: Dict[str, Any]) -> Path:
 @pytest.fixture
 def config(config_file: Path) -> Config:
     """Return a Config instance backed by the temporary config file."""
-    with patch.object(Config, "_load_config") as mock_load:
-        with open(config_file, "r", encoding="utf-8") as f:
-            mock_load.return_value = json.load(f)
-        cfg = Config.__new__(Config)
-        cfg.config_path = config_file
-        cfg._config = mock_load.return_value
-        return cfg
+    return Config(str(config_file))
 
 
 # ---------------------------------------------------------------------------

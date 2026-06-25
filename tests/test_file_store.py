@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from file_store import FileStore
+from openmem.file_store import FileStore
 
 
 # ---------------------------------------------------------------------------

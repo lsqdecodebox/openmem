@@ -11,38 +11,34 @@
 - **健康检查**：定期检查 Wiki 结构完整性，修复损坏的链接和缺失的元数据
 - **导出备份**：一键导出整个知识库为 ZIP 文件
 
-## 项目结构
-
-```
-openmem/
-├── main.py              # MCP 服务主入口
-├── config.py            # 配置文件管理
-├── file_store.py        # 文件系统操作层
-├── llm_client.py        # OpenAI 兼容 LLM 客户端
-├── write_engine.py      # 写入引擎（渐进式匹配+编辑）
-├── read_engine.py       # 读取引擎（渐进式搜索）
-├── health_engine.py     # 健康检查引擎
-├── openmem.json.example # 配置文件模板
-└── requirements.txt     # 依赖列表
-```
-
-## 快速开始
-
-### 1. 安装依赖
+## 安装
 
 ```bash
-pip install -r requirements.txt
+pip install openmem-mcp
 ```
 
-### 2. 配置项目
-
-复制配置文件模板并修改：
+或开发模式：
 
 ```bash
-cp openmem.json.example openmem.json
+cd openmem-mcp
+pip install -e .
 ```
 
-编辑 `openmem.json`，填入您的 LLM API 密钥：
+## 配置
+
+### 1. 首次运行
+
+直接运行 `python -m openmem`，程序会自动复制配置模板到 `~/.config/openmem/openmem.json`。
+
+```bash
+python -m openmem
+# 输出：已复制配置文件模板到: ~/.config/openmem/openmem.json
+# 请编辑该文件，填入您的 LLM API 密钥后再运行。
+```
+
+### 2. 编辑配置文件
+
+编辑 `~/.config/openmem/openmem.json`，填入您的 LLM API 密钥：
 
 ```json
 {
@@ -62,10 +58,15 @@ cp openmem.json.example openmem.json
 }
 ```
 
-### 3. 运行服务
+### 3. 配置方式优先级
+
+1. 环境变量 `OPENMEM_CONFIG` 指定的路径
+2. `~/.config/openmem/openmem.json`（默认）
+
+## 运行
 
 ```bash
-python main.py
+python -m openmem
 ```
 
 ## OpenCode 集成配置
@@ -78,8 +79,8 @@ python main.py
 6. 填写以下配置：
    - **名称**：Personal Wiki Memory
    - **命令**：python
-   - **参数**：`/path/to/your/openmem/main.py`
-   - **工作目录**：`/path/to/your/openmem`
+   - **参数**：`-m openmem`
+   - **工作目录**：您的 openmem-mcp 目录
 7. 点击 **保存**
 8. 重启 OpenCode
 
@@ -119,7 +120,7 @@ python main.py
 
 1. 打开 Obsidian
 2. 选择 **打开文件夹作为库**
-3. 选择您的 `wiki_root` 目录
+3. 选择您的 `wiki_root` 目录（默认是 `./wiki`）
 4. 现在您可以在 Obsidian 中直接查看和编辑所有记忆文件
 
 ## MCP 工具列表
@@ -134,6 +135,26 @@ python main.py
 | `create_directory` | 创建新目录和对应的目录.md |
 | `run_health_check` | 运行完整的 Wiki 健康检查 |
 | `export_wiki` | 导出整个 Wiki 为 ZIP 文件 |
+
+## 项目结构
+
+```
+openmem-mcp/
+├── openmem/
+│   ├── __init__.py       # 包入口
+│   ├── __main__.py       # python -m openmem 入口
+│   ├── config.py         # 配置文件管理
+│   ├── file_store.py     # 文件系统操作层
+│   ├── llm_client.py     # OpenAI 兼容 LLM 客户端
+│   ├── write_engine.py   # 写入引擎（渐进式匹配+编辑）
+│   ├── read_engine.py    # 读取引擎（渐进式搜索）
+│   ├── health_engine.py  # 健康检查引擎
+│   └── main.py           # MCP 服务主入口
+├── tests/                # 测试目录
+├── pyproject.toml        # 包构建配置
+├── openmem.json.example  # 配置文件模板
+└── README.md
+```
 
 ## 注意事项
 

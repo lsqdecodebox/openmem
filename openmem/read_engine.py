@@ -1,7 +1,7 @@
 from typing import Optional, List, Dict, Any
 import logging
-from file_store import FileStore
-from llm_client import LLMClient
+from openmem.file_store import FileStore
+from openmem.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 

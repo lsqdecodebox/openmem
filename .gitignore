@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.pyc
+
+# Test
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Wiki 运行时生成
+wikitest0525/
+wiki/
+
+# 配置文件（包含API key）
+openmem.json
+
+# IDE
+.idea/
+.vscode/

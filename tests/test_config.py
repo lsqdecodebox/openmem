@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from config import Config
+from openmem.config import Config
 
 
 class TestConfigInitialization:

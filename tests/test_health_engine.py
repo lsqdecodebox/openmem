@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from health_engine import HealthEngine
+from openmem.health_engine import HealthEngine
 
 
 class TestHealthEngineRunCheck:

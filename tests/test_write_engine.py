@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from write_engine import WriteEngine
+from openmem.write_engine import WriteEngine
 
 
 class TestWriteEngineAddMemory:

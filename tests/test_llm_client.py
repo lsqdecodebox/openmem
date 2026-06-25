@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from llm_client import LLMClient
+from openmem.llm_client import LLMClient
 
 
 @pytest.fixture
@@ -44,7 +44,7 @@ class TestLLMClientInit:
 
     def test_init_with_defaults(self):
         """LLMClient should apply defaults for missing config keys."""
-        with patch("llm_client.OpenAI") as MockOpenAI:
+        with patch("openmem.llm_client.OpenAI") as MockOpenAI:
             MockOpenAI.return_value = MagicMock()
             client = LLMClient({})
             assert client.base_url == "https://api.openai.com/v1"

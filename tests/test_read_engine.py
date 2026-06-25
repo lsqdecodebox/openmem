@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from read_engine import ReadEngine
+from openmem.read_engine import ReadEngine
 
 
 class TestReadEngineSearch:
