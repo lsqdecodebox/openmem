@@ -20,6 +20,7 @@ config = Config("openmem.json")
 
 # 配置日志 - 日志文件放在wiki_root目录中
 log_dir = config.wiki_root
+log_dir.mkdir(parents=True, exist_ok=True)
 log_path = log_dir / "openmem.log"
 logging.basicConfig(
     level=logging.INFO,
