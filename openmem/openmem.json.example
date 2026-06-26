@@ -1,5 +1,5 @@
 {
-  "wiki_root": "./wiki",
+  "wiki_root": "~/.config/openmem/wiki",
   "max_depth": 7,
   "default_tags": [],
   "llm": {
