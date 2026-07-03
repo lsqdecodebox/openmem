@@ -865,3 +865,423 @@ pip install -e .
 5. **强制规范**：所有文件都遵循统一格式，结构清晰、易于维护
 6. **记忆不重叠**：核心提示词驱动合并判断，确保内容精简不冗余
 7. **安全可恢复**：每次改动自动快照，可配置保留策略
+
+
+## 附录A：FastMCP 使用指南
+
+> 基于 fastmcp 3.3.1 源码分析整理，涵盖工具名称、描述、参数说明、日志、资源、Prompt 等配置方法。
+
+### A.1 工具注册（@mcp.tool）
+
+#### A.1.1 工具名称
+
+通过 `@mcp.tool(name="xxx")` 显式指定；不指定则默认使用函数名。
+
+```python
+# 方式1：显式指定名称
+@mcp.tool(name="add_memory")
+def add_memory(content: str) -> str:
+    pass
+
+# 方式2：位置参数指定名称
+@mcp.tool("add_memory")
+def add_memory(content: str) -> str:
+    pass
+
+# 方式3：不指定，默认函数名 "add_memory"
+@mcp.tool()
+def add_memory(content: str) -> str:
+    pass
+```
+
+**源码位置**：`fastmcp/tools/function_tool.py:214` — `func_name = metadata.name or parsed_fn.name`
+
+#### A.1.2 工具描述
+
+通过 `@mcp.tool(description="xxx")` 显式指定；不指定则自动从函数 docstring 解析首段文本。
+
+```python
+# 方式1：显式指定描述
+@mcp.tool(description="添加新记忆，自动分类到最合适的Wiki位置")
+def add_memory(content: str) -> str:
+    pass
+
+# 方式2：从docstring自动提取
+@mcp.tool()
+def add_memory(content: str) -> str:
+    """
+    添加新记忆，自动分类到最合适的Wiki位置
+    """
+    pass
+```
+
+**优先级**：`description` 参数 > docstring 首段文本
+
+**源码位置**：`fastmcp/tools/function_tool.py:268-270`
+```python
+description=metadata.description
+if metadata.description is not None
+else parsed_fn.description,
+```
+
+其中 `parsed_fn.description` 来自 docstring 解析（详见 A.1.3）。
+
+#### A.1.3 参数说明
+
+参数说明通过 **docstring 的 Args 段落** 配置，底层使用 `griffe` 库解析，支持 Google、NumPy、Sphinx 三种格式（按序尝试，取首个成功解析到参数描述的）。
+
+**Google 风格（推荐）**：
+
+```python
+@mcp.tool()
+def search_memories(query: str, max_depth: int = 7, max_results: int = 3) -> str:
+    """
+    搜索记忆，从根目录开始渐进式查找
+
+    Args:
+        query: 搜索查询关键词
+        max_depth: 最大搜索深度，默认7
+        max_results: 最多返回结果数，默认3
+
+    Returns:
+        结构化的搜索结果
+    """
+    pass
+```
+
+**NumPy 风格**：
+
+```python
+@mcp.tool()
+def search_memories(query, max_depth=7, max_results=3):
+    """
+    搜索记忆，从根目录开始渐进式查找
+
+    Parameters
+    ----------
+    query : str
+        搜索查询关键词
+    max_depth : int, optional
+        最大搜索深度，默认7
+    max_results : int, optional
+        最多返回结果数，默认3
+
+    Returns
+    -------
+    str
+        结构化的搜索结果
+    """
+    pass
+```
+
+**Sphinx 风格**：
+
+```python
+@mcp.tool()
+def search_memories(query, max_depth=7, max_results=3):
+    """
+    搜索记忆，从根目录开始渐进式查找
+
+    :param query: 搜索查询关键词
+    :param max_depth: 最大搜索深度，默认7
+    :param max_results: 最多返回结果数，默认3
+    :return: 结构化的搜索结果
+    """
+    pass
+```
+
+**Pydantic Field 描述**（优先级高于 docstring）：
+
+```python
+from pydantic import Field
+
+@mcp.tool()
+def add_memory(
+    content: str = Field(description="要添加的记忆内容"),
+    path: str = Field(default=None, description="可选的建议路径，如'/00-个人/学习'"),
+) -> str:
+    pass
+```
+
+**优先级**：`Field(description=...)` / `Annotated[type, "描述"]` > docstring Args 段落
+
+**源码位置**：
+- docstring 解析：`fastmcp/utilities/docstring_parsing.py` — `parse_docstring()` 函数
+- 参数描述注入 JSON Schema：`fastmcp/tools/function_parsing.py` 中，docstring Args 的描述仅在该参数尚未有 description 时注入（不会覆盖 Field 描述）
+
+#### A.1.4 参数类型与 JSON Schema
+
+FastMCP 使用 Pydantic 的 `TypeAdapter` 自动从 Python 类型注解生成 JSON Schema，客户端看到的所有参数信息（类型、描述、默认值、必填/选填）均由此生成。
+
+```python
+@mcp.tool()
+def write_memory(
+    content: str,                                    # 必填，类型string
+    path: str = None,                                # 选填，类型string|null
+    mode: str = "merge",                             # 选填，默认"merge"
+    tags: list[str] = None,                          # 选填，类型array of string
+) -> str:
+    pass
+```
+
+客户端收到的 `inputSchema` 大致为：
+```json
+{
+    "type": "object",
+    "properties": {
+        "content": {"type": "string", "description": "要写入的记忆内容"},
+        "path": {"type": "string", "description": "目标路径", "default": null},
+        "mode": {"type": "string", "description": "更新模式", "default": "merge"},
+        "tags": {"type": "array", "items": {"type": "string"}, "description": "标签列表"}
+    },
+    "required": ["content"]
+}
+```
+
+
+### A.2 资源注册（@mcp.resource）
+
+#### A.2.1 基本用法
+
+```python
+@mcp.resource("wiki://config")
+def get_config() -> str:
+    """获取当前Wiki配置信息"""
+    return "..."
+```
+
+#### A.2.2 可配置参数
+
+```python
+@mcp.resource(
+    uri="wiki://page/{path}",        # 资源URI（必填），支持模板参数
+    name="get_page",                 # 资源名称，默认函数名
+    title="Wiki页面",                # 显示标题
+    description="获取Wiki页面内容",   # 描述，fallback到docstring
+    mime_type="text/markdown",       # MIME类型，默认text/plain
+    tags={"wiki", "page"},           # 标签集合
+    icons=None,                      # 图标列表
+    annotations=None,                # MCP Annotations对象
+    meta=None,                       # 自定义元数据字典
+)
+def get_page(path: str) -> str:
+    pass
+```
+
+#### A.2.3 URI 模板语法（RFC 6570 子集）
+
+| 语法 | 说明 | 示例 |
+|------|------|------|
+| `{var}` | 路径参数，匹配单个段 | `wiki://page/{path}` → `wiki://page/Python学习笔记` |
+| `{var*}` | 通配路径参数，匹配多段 | `wiki://file/{path*}` → `wiki://file/00-个人/学习/笔记` |
+| `{?var1,var2}` | 查询参数，必须为可选参数 | `wiki://search/{query}{?limit,offset}` → `wiki://search/python?limit=10` |
+
+**模板参数约束**：
+- URI 中的路径参数必须覆盖函数的所有必填参数
+- 查询参数（`{?...}`）对应的函数参数必须有默认值
+- URI 参数名中连字符自动转下划线匹配 Python 参数名（如 `{user-id}` 对应 `user_id`）
+
+```python
+@mcp.resource("wiki://search/{query}{?limit,offset}")
+def search(query: str, limit: int = 10, offset: int = 0) -> str:
+    """搜索Wiki内容"""
+    pass
+```
+
+#### A.2.4 资源 vs 资源模板
+
+FastMCP 自动区分：
+- **无参数的资源**（函数无参数且 URI 无 `{}`）：注册为静态 `FunctionResource`
+- **有参数的资源**（URI 含 `{}` 或函数有参数）：注册为 `FunctionResourceTemplate`
+
+**源码位置**：`fastmcp/resources/function_resource.py:274-311`
+
+
+### A.3 Prompt 注册（@mcp.prompt）
+
+#### A.3.1 基本用法
+
+```python
+@mcp.prompt(name="summarize", description="总结文档内容")
+def summarize_prompt(document: str, max_length: int = 100) -> str:
+    """
+    生成文档摘要
+
+    Args:
+        document: 要总结的文档内容
+        max_length: 摘要最大长度
+    """
+    return f"请总结以下内容，控制在{max_length}字以内：\n{document}"
+```
+
+#### A.3.2 可配置参数
+
+```python
+@mcp.prompt(
+    name="summarize",                # Prompt名称，默认函数名
+    title="文档摘要",                 # 显示标题
+    description="总结文档内容",        # 描述，fallback到docstring
+    icons=None,                      # 图标列表
+    tags={"summary"},                # 标签集合
+    meta=None,                       # 自定义元数据字典
+)
+def summarize_prompt(document: str) -> str:
+    pass
+```
+
+#### A.3.3 返回值类型
+
+Prompt 函数可返回以下类型：
+- `str`：自动包装为单条 user Message
+- `list[Message | str]`：转换为 Message 列表
+- `PromptResult`：直接使用
+
+#### A.3.4 参数说明注入
+
+与 Tool 相同，Prompt 的参数说明也从 docstring Args 段落解析并注入到 `PromptArgument.description` 中。对于非 string 类型的参数，FastMCP 会自动在描述末尾追加 JSON Schema 信息，帮助客户端以字符串格式传参。
+
+**源码位置**：`fastmcp/prompts/function_prompt.py:208-259`
+
+#### A.3.5 限制
+
+- 不支持 `*args` 和 `**kwargs`
+- Lambda 函数必须显式提供 `name`
+
+
+### A.4 日志配置
+
+#### A.4.1 FastMCP 内置日志系统
+
+FastMCP 使用 `fastmcp.settings`（`Settings` 类实例）控制日志行为，所有设置均可通过环境变量覆盖：
+
+| 设置项 | 环境变量 | 默认值 | 说明 |
+|--------|----------|--------|------|
+| `log_enabled` | `FASTMCP_LOG_ENABLED` | `True` | 是否启用日志 |
+| `log_level` | `FASTMCP_LOG_LEVEL` | `"INFO"` | 日志级别 |
+| `enable_rich_logging` | `FASTMCP_ENABLE_RICH_LOGGING` | `True` | 是否使用 Rich 格式化输出 |
+| `enable_rich_tracebacks` | `FASTMCP_ENABLE_RICH_TRACEBACKS` | `True` | 是否使用 Rich 异常追踪 |
+
+**在代码中获取 logger**：
+
+```python
+from fastmcp.utilities.logging import get_logger
+logger = get_logger(__name__)  # 返回名为 "fastmcp.{模块名}" 的 logger
+```
+
+**手动配置日志**：
+
+```python
+from fastmcp.utilities.logging import configure_logging
+
+configure_logging(
+    level="DEBUG",                    # 日志级别
+    enable_rich_tracebacks=True,      # Rich异常追踪
+)
+```
+
+**运行时修改设置**：
+
+```python
+import fastmcp
+fastmcp.settings.log_level = "DEBUG"   # 自动生效
+fastmcp.settings.log_enabled = False   # 关闭日志
+```
+
+**源码位置**：
+- Settings 定义：`fastmcp/settings.py:136-181`
+- 日志配置函数：`fastmcp/utilities/logging.py:29-113`
+
+#### A.4.2 与项目自定义日志的关系
+
+本项目（openmem）在 `main.py` 中使用 Python 标准 `logging` 模块自行配置日志，独立于 FastMCP 内置日志：
+
+```python
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(str(log_path), encoding="utf-8"),
+        logging.StreamHandler()
+    ]
+)
+```
+
+两者共存时，FastMCP 的 logger（`fastmcp.*`）由 FastMCP 内部管理，项目自身的 logger（`openmem.*`）由项目 `logging.basicConfig` 管理，互不干扰。
+
+#### A.4.3 MCP 协议日志（发送给客户端）
+
+FastMCP 支持通过 MCP 协议向客户端发送日志消息，由 `client_log_level` 设置控制：
+
+| 设置项 | 环境变量 | 默认值 | 说明 |
+|--------|----------|--------|------|
+| `client_log_level` | `FASTMCP_CLIENT_LOG_LEVEL` | `None` | 发送给客户端的最低日志级别 |
+
+可选值：`"debug"` / `"info"` / `"notice"` / `"warning"` / `"error"` / `"critical"` / `"alert"` / `"emergency"`
+
+设为 `None` 则不主动发送日志给客户端。
+
+
+### A.5 快速对照表
+
+| 客户端可见项 | 配置位置 | 优先级 |
+|-------------|---------|--------|
+| 工具名称 | `@mcp.tool(name="...")` → 函数名 | name参数 > 函数名 |
+| 工具描述 | `@mcp.tool(description="...")` → docstring首段 | description参数 > docstring |
+| 参数名称 | Python 函数参数名 | — |
+| 参数类型 | Python 类型注解（经 Pydantic TypeAdapter 生成 JSON Schema） | — |
+| 参数描述 | `Field(description=...)` → docstring Args 段落 | Field > docstring Args |
+| 参数必填/选填 | 函数签名默认值（无默认值=必填） | — |
+| 资源名称 | `@mcp.resource(uri, name="...")` → 函数名 | name参数 > 函数名 |
+| 资源描述 | `@mcp.resource(..., description="...")` → docstring | description参数 > docstring |
+| 资源 MIME 类型 | `@mcp.resource(..., mime_type="...")` | 显式指定 > `text/plain` |
+| Prompt 名称 | `@mcp.prompt(name="...")` → 函数名 | name参数 > 函数名 |
+| Prompt 描述 | `@mcp.prompt(description="...")` → docstring | description参数 > docstring |
+| Prompt 参数描述 | docstring Args 段落 | 与 Tool 相同 |
+
+
+### A.6 装饰器参数总览
+
+#### @mcp.tool() 完整参数
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `name` / 位置参数 | `str` | 函数名 | 工具名称 |
+| `title` | `str` | `None` | 显示标题 |
+| `description` | `str` | docstring | 工具描述 |
+| `version` | `str \| int` | `None` | 工具版本号 |
+| `icons` | `list[Icon]` | `None` | 图标列表 |
+| `tags` | `set[str]` | `None` | 标签集合 |
+| `annotations` | `ToolAnnotations \| dict` | `None` | MCP 工具行为注解 |
+| `output_schema` | `dict` | 自动推断 | 输出 JSON Schema |
+| `meta` | `dict` | `None` | 自定义元数据 |
+| `enabled` | `bool` | `True` | 是否启用 |
+| `timeout` | `float` | `None` | 执行超时（秒） |
+| `run_in_thread` | `bool` | `True` | 同步函数是否在线程池执行 |
+| `auth` | `AuthCheck \| list` | `None` | 授权检查 |
+
+#### @mcp.resource() 完整参数
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `uri`（必填） | `str` | — | 资源 URI，支持模板参数 |
+| `name` | `str` | 函数名 | 资源名称 |
+| `title` | `str` | `None` | 显示标题 |
+| `description` | `str` | docstring | 资源描述 |
+| `version` | `str \| int` | `None` | 资源版本号 |
+| `icons` | `list[Icon]` | `None` | 图标列表 |
+| `mime_type` | `str` | `"text/plain"` | MIME 类型 |
+| `tags` | `set[str]` | `None` | 标签集合 |
+| `annotations` | `Annotations \| dict` | `None` | MCP 资源注解 |
+| `meta` | `dict` | `None` | 自定义元数据 |
+
+#### @mcp.prompt() 完整参数
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `name` / 位置参数 | `str` | 函数名 | Prompt 名称 |
+| `title` | `str` | `None` | 显示标题 |
+| `description` | `str` | docstring | Prompt 描述 |
+| `version` | `str \| int` | `None` | 版本号 |
+| `icons` | `list[Icon]` | `None` | 图标列表 |
+| `tags` | `set[str]` | `None` | 标签集合 |
+| `meta` | `dict` | `None` | 自定义元数据 |
