@@ -17,6 +17,12 @@ OpenMem MCP 集成测试脚本
   - create_directory 创建目录
   - run_health_check 健康检查
   - export_wiki     导出 Wiki
+
+代码结构概览：
+  1. run_standalone_tests()  — 独立模式入口：创建临时目录 + 子进程执行
+  2. run_standalone_worker() — 独立模式工作进程：mock Config 后直接调用 main 中的函数
+  3. run_client_tests()      — 客户端模式：通过 MCP 协议远程调用
+  4. main()                  — 命令行参数解析，调度上述三种模式
 """
 
 import argparse
@@ -50,18 +56,29 @@ def print_result(ok: bool, msg: str):
 
 def run_standalone_tests():
     """
-    在子进程中运行集成测试。
-    使用临时 wiki 目录和临时配置文件，完全隔离，不影响已有数据。
-    使用 --standalone-worker 标志调用自身执行实际测试逻辑。
+    独立模式的主控函数。
+    流程：
+      1. 创建临时目录（tempfile.mkdtemp），作为隔离的 wiki 根目录
+      2. 读取项目根目录的 openmem.json，将其 wiki_root 改为临时目录
+      3. 将修改后的配置写入临时目录下的 openmem.json
+      4. 设置环境变量 OPENMEM_CONFIG 指向临时配置
+      5. 以 --standalone-worker 参数启动自身子进程（subprocess.run）
+         - 子进程会执行 run_standalone_worker() 中的实际测试逻辑
+         - 子进程的 stdout/stderr 直接输出到终端（capture_output=False）
+      6. 子进程结束后，清理临时目录
+      7. 根据子进程返回码判断测试是否全部通过
+
+    这样做的目的是：完全隔离测试环境，不影响用户已有的 wiki 数据。
     """
     tmp_dir = tempfile.mkdtemp(prefix="openmem_test_")
     worker_script = os.path.join(SCRIPT_DIR, "test_mcp_integration.py")
 
-    # 创建临时配置文件
+    # 读取项目根目录的 openmem.json 配置
     config_path = os.path.join(PROJECT_DIR, "openmem.json")
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
 
+    # 将 wiki_root 改为临时目录
     config["wiki_root"] = tmp_dir
     test_config_path = os.path.join(tmp_dir, "openmem.json")
     with open(test_config_path, "w", encoding="utf-8") as f:
@@ -95,9 +112,30 @@ def run_standalone_tests():
 
 def run_standalone_worker():
     """
-    在隔离环境中执行实际的集成测试逻辑。
-    由 run_standalone_tests 通过子进程启动。
-    通过 OPENMEM_CONFIG 环境变量获取临时配置文件路径。
+    独立模式的实际测试函数，在隔离的子进程中执行。
+    流程：
+      1. 从环境变量 OPENMEM_CONFIG 读取临时配置文件路径
+      2. 读取临时配置文件，获取临时 wiki_root 路径
+      3. 将项目目录加入 sys.path，以便导入 main 模块
+      4. 使用 unittest.mock 模拟 main.Config：
+         - 将 wiki_root 指向临时目录
+         - 从临时配置中读取 max_depth / default_tags / llm_config
+      5. 导入 main 模块中的 mcp 对象和所有 tool 函数
+      6. 创建一个新的事件循环，依次执行 10 项测试：
+         测试1:  工具注册检查 — 调用 mcp.list_tools() 验证 8 个工具已注册
+         测试2:  add_memory — 添加一条测试记忆，记录返回的页面路径
+         测试3:  get_page — 读取刚才添加的页面，验证内容包含"测试记忆"
+         测试4:  get_directory — 读取根目录 "/"
+         测试5:  update_memory(append) — 追加内容
+         测试6:  update_memory(overwrite) — 覆盖内容 + 验证覆盖结果
+         测试7:  search_memories — 搜索关键词"测试"
+         测试8:  create_directory — 创建目录 /测试目录 + 验证目录存在
+         测试9:  run_health_check — 健康检查，验证返回 dict
+         测试10: export_wiki — 导出为 zip 文件，验证文件存在
+      7. 全部通过返回 0，否则返回 1
+
+    注意：由于 main 模块在导入时会自动初始化 MCP 服务和 wiki 对象，
+          而 wiki 对象依赖于 Config，所以必须在 import main 之前 mock Config。
     """
     test_config_path = os.environ.get("OPENMEM_CONFIG")
     if not test_config_path:
@@ -136,6 +174,9 @@ def run_standalone_worker():
 
         try:
             # ---- 1. 工具注册检查 ----
+            # 调用 mcp.list_tools() 获取已注册的工具列表
+            # 验证是否包含预期的 8 个工具：add_memory, update_memory, ...
+            # 同时报告是否存在多余的工具（非预期工具）
             print_header("测试1: 工具注册检查")
             tool_list = loop.run_until_complete(mcp.list_tools())
             tool_names = {t.name for t in tool_list}
@@ -154,6 +195,8 @@ def run_standalone_worker():
                 print_result(True, f"已注册 {len(tool_names)} 个工具{extra_msg}")
 
             # ---- 2. add_memory ----
+            # 调用 add_memory 添加一条 markdown 格式的记忆
+            # 成功时返回页面路径（字符串），失败时返回包含"错误"的字符串
             print_header("测试2: add_memory")
             result = add_memory(
                 content="# 测试记忆\n\n这是一条集成测试记忆。",
@@ -168,6 +211,7 @@ def run_standalone_worker():
                 print_result(True, f"add_memory 成功: {test_page_path}")
 
                 # ---- 3. get_page ----
+                # 使用上一步返回的路径读取页面，验证内容包含"测试记忆"
                 print_header("测试3: get_page")
                 result = get_page(path=test_page_path)
                 if "错误" in result:
@@ -180,6 +224,7 @@ def run_standalone_worker():
                     print_result(True, "get_page 成功，内容包含'测试记忆'")
 
                 # ---- 4. get_directory ----
+                # 读取根目录，验证返回非空（不含"错误"）
                 print_header("测试4: get_directory")
                 result = get_directory(path="/")
                 if "错误" in result:
@@ -189,6 +234,8 @@ def run_standalone_worker():
                     print_result(True, "get_directory 成功，根目录非空")
 
                 # ---- 5. update_memory (append) ----
+                # 以追加模式（append）更新页面内容
+                # 成功时返回 True，失败时返回包含"错误"的字符串
                 print_header("测试5: update_memory (append)")
                 result = update_memory(
                     path=test_page_path,
@@ -202,6 +249,8 @@ def run_standalone_worker():
                     print_result(True, "update_memory (append) 成功")
 
                 # ---- 6. update_memory (overwrite) ----
+                # 以覆盖模式（overwrite）更新页面内容
+                # 然后用 get_page 验证内容已被覆盖
                 print_header("测试6: update_memory (overwrite)")
                 result = update_memory(
                     path=test_page_path,
@@ -223,6 +272,7 @@ def run_standalone_worker():
                     print_result(True, "验证覆盖内容成功")
 
                 # ---- 7. search_memories ----
+                # 搜索关键词"测试"，最多返回 3 条结果
                 print_header("测试7: search_memories")
                 result = search_memories(query="测试", max_results=3)
                 if "错误" in result:
@@ -232,6 +282,7 @@ def run_standalone_worker():
                     print_result(True, "search_memories 成功")
 
             # ---- 8. create_directory ----
+            # 创建目录 /测试目录，并验证根目录中能看到它
             print_header("测试8: create_directory")
             result = create_directory(
                 path="/测试目录",
@@ -253,6 +304,8 @@ def run_standalone_worker():
                 print_result(True, "验证目录创建成功")
 
             # ---- 9. run_health_check ----
+            # 健康检查，验证返回值为 dict 类型
+            # 打印 errors 和 warnings 的数量
             print_header("测试9: run_health_check")
             result = run_health_check()
             if not isinstance(result, dict):
@@ -262,6 +315,7 @@ def run_standalone_worker():
                 print_result(True, f"run_health_check 成功: errors={len(result.get('errors', []))}, warnings={len(result.get('warnings', []))}")
 
             # ---- 10. export_wiki ----
+            # 导出 wiki 为 zip 文件，验证导出文件存在
             print_header("测试10: export_wiki")
             export_path = os.path.join(tmp_dir, "wiki_export.zip")
             result = export_wiki(output_path=export_path)
@@ -299,6 +353,27 @@ def run_standalone_worker():
 # ============================================================================
 
 def run_client_tests(server_url: str = None):
+    """
+    客户端模式测试函数。
+    流程：
+      1. 使用 mcp 库的 ClientSession + stdio_client
+      2. 以子进程方式启动 main.py 作为 MCP 服务端
+      3. 通过 MCP 协议（session.call_tool）依次调用各工具
+      4. 测试项（共 9 项，比独立模式少 update_memory overwrite 验证）：
+         测试1: 工具注册检查 — 验证工具数量 >= 8
+         测试2: add_memory — 添加记忆
+         测试3: get_page — 读取页面
+         测试4: get_directory — 读取目录
+         测试5: update_memory(append) — 追加更新
+         测试6: search_memories — 搜索
+         测试7: create_directory — 创建目录
+         测试8: run_health_check — 健康检查
+         测试9: export_wiki — 导出 wiki
+
+    注意：此模式直接操作真实的 wiki 数据（使用 openmem.json 中的配置），
+          会实际修改 wiki 文件，因此适合在测试环境而非生产环境运行。
+    server_url 参数当前未使用，保留供未来扩展（如连接远程 MCP 服务）。
+    """
     try:
         from mcp import ClientSession, StdioServerParameters
         from mcp.client.stdio import stdio_client
@@ -308,11 +383,13 @@ def run_client_tests(server_url: str = None):
         return False
 
     async def test():
+        # 配置 MCP 服务端参数：通过子进程运行 main.py
         server_params = StdioServerParameters(
             command=PYTHON,
             args=["main.py"]
         )
 
+        # 建立 stdio 通道并创建客户端 session
         async with stdio_client(server_params) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
@@ -408,6 +485,13 @@ def run_client_tests(server_url: str = None):
 # ============================================================================
 
 def main():
+    """
+    命令行入口：
+      --standalone / -s     : 独立模式（推荐），使用临时目录隔离测试
+      --standalone-worker   : 内部参数，被 --standalone 调用的子进程使用
+      --client / -c         : 客户端模式，通过 MCP 协议连接本地的 main.py 服务
+      无参数时默认走客户端模式
+    """
     parser = argparse.ArgumentParser(description="OpenMem MCP 集成测试")
     parser.add_argument(
         "--standalone", "-s",
@@ -417,7 +501,7 @@ def main():
     parser.add_argument(
         "--standalone-worker",
         action="store_true",
-        help=argparse.SUPPRESS
+        help=argparse.SUPPRESS  # 不显示在帮助中，仅供内部使用
     )
     parser.add_argument(
         "--client", "-c",
