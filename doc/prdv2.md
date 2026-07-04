@@ -6,18 +6,18 @@
 ```mermaid
 flowchart TD
     A[智能体端<br/>Claude / OpenCode] --> B[MCP协议接入层<br/>FastMCP]
+    A -->|LLM+核心提示词<br/>完成调度决策| A
 
     subgraph 记忆核心业务层
         C1[获取Wiki层级文件列表]
         C2[读取某一个Wiki文件]
         C3[写入Wiki文件<br/>缺目录自动创建]
-        C4[核心提示词<br/>一级目录下所有文件]
     end
 
     B --> C1
     B --> C2
     B --> C3
-    B --> C4
+    B --> C4[获取核心提示词<br/>暴露给客户端LLM]
 
     C1 --> D[文件系统存储层<br/>Obsidian原生兼容]
     C2 --> D
@@ -57,7 +57,7 @@ wiki-root/
 
 ### 2.2 核心提示词文件
 
-位于Wiki根目录（一级目录）下的所有 `.md` 文件均为核心提示词文件，写入引擎在每次执行写入前必须读取**所有**核心提示词文件作为决策依据。
+位于Wiki根目录（一级目录）下的所有 `.md` 文件均为核心提示词文件。核心提示词**允许写入流程内部逻辑读取**，但其主要使用方式是**通过MCP接口直接暴露给客户端**（如Claude），由客户端LLM结合提示词完成调度决策（如何分类、是否合并、写入哪里等）。
 
 **核心提示词文件列表**（并列关系，各司其职）：
 
@@ -172,39 +172,29 @@ tags: ["核心", "整理"]
 
 ## 整理流程
 
-### 第一步：诊断现状
-1. 使用 `get_directory` 获取当前Wiki完整目录树
-2. 使用 `run_health_check` 检查结构健康度，关注warnings和suggestions
-3. 识别以下问题：
-   - 空目录（无子页面）
-   - 过短页面（内容不足20字）
-   - 过长页面（内容超过500字）
-   - 重叠页面（主题相似的兄弟页面）
+### 第一步：扫描目录结构
+- 从根目录开始，递归遍历所有目录和页面
+- 记录每个目录下的页面数量和子目录数量
+- 识别空目录（无子目录且无页面）和层级过深的目录（超过5层）
 
-### 第二步：制定整理方案
-1. 标记需要合并的页面组（基于合并原则判断）
-2. 标记需要拆分的页面（内容过长且包含多个独立主题）
-3. 标记需要删除的空目录
-4. 确定目标目录结构
+### 第二步：检查单篇规范
+- 找出内容超过500字的页面，标记为待拆分候选
+- 找出内容不足20字的页面，标记为待归并候选
 
-### 第三步：执行整理
-1. 读取待合并页面：使用 `read_memory` 获取完整内容
-2. 合并内容：使用 `write_memory` 以merge模式写入目标页面
-3. 删除冗余页面：合并完成后用 `write_memory` 覆盖为重定向说明
-4. 创建新目录：使用 `create_directory` 建立新分类
-5. 迁移内容：将拆分出的子主题 `write_memory` 到新路径
-6. 更新摘要：每次修改后确保summary准确反映页面内容
+### 第三步：检查归并需求
+- 遍历同一目录下的所有页面，比较主题重叠度
+- 依据"记忆管理规则"中的合并原则（四项中任意三项相同则合并），标记需合并的页面组
 
-### 第四步：验证整理结果
-1. 再次 `run_health_check` 确认无新增错误
-2. `get_directory` 确认目录结构符合预期
-3. `read_memory` 抽检关键页面内容完整性
+### 第四步：执行整理
+- 对待归并页面：将内容合并到信息更完整的页面，补充另一篇的独特内容，删除冗余页面
+- 对待拆分页面：按子主题拆分为子页面，在原页面保留概览和子页面链接
+- 对空目录：直接删除
+- 对层级过深的目录：将深层页面提升到更合理的层级
 
-## 整理触发时机
-- 用户明确要求整理Wiki
-- `run_health_check` 报告3个以上warnings
-- 用户写入新记忆后，检测到潜在的结构冲突
-- 定期整理（建议每周一次）
+### 第五步：验证与收尾
+- 确认整理后所有页面Front Matter字段完整（title、type、level、summary、tags）
+- 确认目录结构符合"序号-名称"命名规范
+- 确认无孤立页面（内容未被任何其他页面引用且不在合理目录下的页面）
 
 ## 注意事项
 - 整理前务必确认快照机制已启用，确保可恢复
@@ -360,16 +350,18 @@ def read_memory(path: str) -> str:
 
 ### 3.3 写入Wiki文件（write_memory）
 
+写入操作允许内部读取核心提示词，但调度决策主要由客户端LLM（结合核心提示词）完成。
+
 ```python
 @mcp.tool()
-def write_memory(path: str = None, tags: list[str] = None, content: str) -> str:
+def write_memory(content: str, path: str = None, tags: list[str] = None) -> str:
     """
     写入记忆
 
     Args:
+        content: 要写入的记忆内容
         path: 目标路径，如"/00-个人/学习/Python学习笔记"。为空时自动分类
         tags: 可选的标签列表
-        content: 要写入的记忆内容
 
     Returns:
         最终页面路径
@@ -381,21 +373,92 @@ def write_memory(path: str = None, tags: list[str] = None, content: str) -> str:
 
 ### 3.4 核心提示词
 
-核心提示词存储在Wiki一级目录下的所有 `.md` 文件中，写入引擎在每次写入前自动读取全部核心提示词文件。
+核心提示词存储在Wiki一级目录下的所有 `.md` 文件中，**通过MCP接口直接暴露给客户端LLM**，由客户端LLM结合提示词完成调度决策。写入流程内部也允许读取核心提示词。
 
-可通过专用接口获取所有核心提示词：
+关于暴露方式的选择分析（详见3.5节）：
 
 ```python
-@mcp.tool()
-def get_core_principles() -> str:
+@mcp.prompt(name="core_principles")
+def core_principles_prompt() -> str:
     """
-    获取所有核心提示词（一级目录下所有.md文件的内容合集）
+    获取所有核心提示词，供客户端LLM用于调度决策
 
     Returns:
         所有核心提示词的完整内容，按文件名排列拼接
     """
     pass
 ```
+
+### 3.5 核心提示词暴露方式分析：Prompt vs Resource vs Tool
+
+核心提示词需要暴露给客户端LLM，MCP协议提供三种机制，分析如下：
+
+#### 方案一：`@mcp.prompt()`（推荐）
+
+```python
+@mcp.prompt(name="core_principles", description="记忆系统核心提示词，包含记忆管理规则、用户偏好、行为指南、整理指南")
+def core_principles_prompt() -> str:
+    """获取所有核心提示词，供LLM调度决策"""
+    return store.get_core_principles()
+```
+
+**优势**：
+- **语义最匹配**：核心提示词本身就是"提示词"，用prompt注册语义完全对齐
+- **客户端原生支持**：Claude Desktop等客户端会通过 `prompts/list` 自动发现可用prompt，用户可直接选择注入对话
+- **LLM自动获取**：客户端LLM可在对话开始时主动获取prompt内容，无需用户手动触发工具调用
+- **支持多prompt**：可将4个核心提示词文件分别注册为独立prompt，客户端按需选择
+
+**劣势**：
+- 客户端对prompt的支持程度不一，部分客户端可能不会自动注入prompt到上下文
+
+#### 方案二：`@mcp.resource()`
+
+```python
+@mcp.resource("wiki://core-principles", name="core_principles", mime_type="text/markdown")
+def core_principles_resource() -> str:
+    """核心提示词资源"""
+    return store.get_core_principles()
+```
+
+**优势**：
+- **语义较匹配**：核心提示词可视为"可读取的数据资源"
+- **客户端自动发现**：客户端通过 `resources/list` 可发现资源，部分客户端会自动订阅资源变更
+- **支持MIME类型**：可声明为 `text/markdown`，客户端可正确渲染
+
+**劣势**：
+- Resource的语义是"数据源"，不如prompt的"提示词"语义精确
+- 客户端不一定自动读取resource内容注入LLM上下文，可能需要用户手动引用
+- Resource更偏向"文件/数据"的读取，核心提示词需要"注入LLM上下文"的行为特征
+
+#### 方案三：`@mcp.tool()`（当前方案）
+
+```python
+@mcp.tool()
+def get_core_principles() -> str:
+    """获取所有核心提示词"""
+    return store.get_core_principles()
+```
+
+**优势**：
+- 实现最简单，客户端普遍支持tool调用
+
+**劣势**：
+- **语义不匹配**：Tool的语义是"执行操作"，获取提示词不涉及任何副作用操作
+- **需要主动调用**：客户端LLM需要先调用tool才能获取提示词，增加了调用链路
+- **浪费token**：LLM需要先决定调用tool → 执行tool → 读取结果 → 再做决策，多一轮交互
+
+#### 结论
+
+| 维度 | Prompt | Resource | Tool |
+|------|--------|----------|------|
+| 语义匹配度 | ★★★ 完全匹配 | ★★ 数据源 | ★ 操作 |
+| LLM自动获取 | ★★ 部分客户端支持 | ★ 需手动引用 | ★ 需主动调用 |
+| 客户端兼容性 | ★★ 主流客户端支持 | ★★ 主流客户端支持 | ★★★ 普遍支持 |
+| 调用效率 | ★★ 直接注入上下文 | ★★ 需引用 | ★ 多一轮交互 |
+
+**推荐方案**：使用 `@mcp.prompt()` 注册核心提示词。若需兼容性保底，可同时用 `@mcp.tool()` 暴露，但主入口为prompt。
+
+> **注意**：具体采用哪种方案需结合目标客户端（Claude Desktop、OpenCode等）对prompt/resource的实际支持情况决定。如果客户端不支持自动注入prompt，退而使用tool方案。
 
 
 ## 四、快照存档机制
@@ -497,7 +560,6 @@ wiki-root/
 | 快照清理 | INFO | 清理数量、释放空间 |
 | 目录自动创建 | INFO | 创建的目录路径 |
 | 7层深度拒绝 | WARNING | 被拒绝的路径、当前深度 |
-| 核心提示词读取 | DEBUG | 读取的文件列表 |
 | 搜索执行 | INFO | 查询关键词、结果数量、耗时 |
 | 健康检查 | INFO | 检查结果摘要 |
 | 导出执行 | INFO | 导出路径、文件数量、总大小 |
@@ -524,13 +586,14 @@ def read_memory(path: str) -> str:
     pass
 
 @mcp.tool()
-def write_memory(content: str, path: str = None, mode: str = "merge", tags: list[str] = None) -> str:
+def write_memory(content: str, path: str = None, tags: list[str] = None) -> str:
     """写入记忆（缺目录自动创建，更新前自动快照）"""
     pass
 
-@mcp.tool()
-def get_core_principles() -> str:
-    """获取所有核心提示词（一级目录下所有.md文件的内容合集）"""
+# 核心提示词暴露 - 推荐使用prompt
+@mcp.prompt(name="core_principles", description="记忆系统核心提示词，供LLM调度决策")
+def core_principles_prompt() -> str:
+    """获取所有核心提示词，供客户端LLM用于调度决策"""
     pass
 
 ```
@@ -541,17 +604,44 @@ def get_core_principles() -> str:
 ### 7.1 模块结构
 
 ```
-openmem/
-├── __init__.py
-├── __main__.py
-├── main.py              # 入口：启动MCP，自动初始化
-├── config.py            # 配置加载与管理
-├── file_store.py        # 文件系统存储层：读写页面、目录树、快照
-├── write_engine.py      # 写入引擎：分类、合并、核心提示词驱动
-├── read_engine.py       # 读取引擎：搜索、渐进式匹配
-├── health_engine.py     # 健康检查引擎
-├── snapshot_manager.py  # 快照管理：创建、清理
-└── initializer.py       # 启动初始化：创建配置、Wiki根目录、核心提示词文件
+openmem-mcp/
+├── pyproject.toml                  # 项目元数据与依赖声明
+├── openmem/
+│   ├── __init__.py             # 包初始化，暴露版本号
+│   ├── main.py                 # 主入口：FastMCP实例、工具注册、日志配置、启动
+│   ├── initializer.py          # 启动初始化：配置文件、Wiki根目录、核心提示词
+│   ├── store.py                # 文件系统存储层：目录导航、页面读写、快照管理
+│   └── utils.py                # 工具函数：Front Matter解析、路径校验、合并策略
+└── tests/
+    ├── test_initializer.py
+    ├── test_mcp_api.py
+    ├── test_store.py
+    └── test_utils.py
+```
+
+### 7.1.1 pyproject.toml
+
+```toml
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openmem-mcp"
+version = "0.1.0"
+description = "LLM驱动的个人Wiki记忆MCP工具"
+requires-python = ">=3.10"
+dependencies = [
+    "fastmcp>=0.1.0",
+    "openai>=1.0.0",
+    "python-frontmatter>=1.0.0",
+    "mistune>=3.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+namespaces = false
 ```
 
 ### 7.2 启动初始化模块（initializer.py）
@@ -561,7 +651,7 @@ import json
 import shutil
 import logging
 from pathlib import Path
-from datetime import datetime
+import frontmatter
 
 logger = logging.getLogger(__name__)
 
@@ -643,10 +733,10 @@ CORE_PROMPTS = {
             "### 结构原则\n"
             "- 目录层级不超过7层，优先3层以内组织\n"
             "- 同一主题的内容归入同一目录，不同主题分目录存放\n"
-            "- 目录命名使用"序号-名称"格式，如"01-工作"、"02-学习"\n"
+            "- 目录命名使用\"序号-名称\"格式，如\"01-工作\"、\"02-学习\"\n"
             "- 空目录应当删除，避免结构冗余\n\n"
             "### 归并原则\n"
-            "- 遵循"记忆管理规则"中的合并原则\n"
+            "- 遵循\"记忆管理规则\"中的合并原则\n"
             "- 两篇页面若主题高度重叠，应合并为一篇\n"
             "- 合并后保留信息更完整的版本作为基底，补充另一篇的独特内容\n"
             "- 合并完成后，将冗余页面内容迁移并删除原页面\n\n"
@@ -655,40 +745,30 @@ CORE_PROMPTS = {
             "- 页面内容超过500字时，考虑拆分为子页面\n"
             "- 页面内容不足20字时，考虑归并到相关父页面或兄弟页面\n\n"
             "## 整理流程\n\n"
-            "### 第一步：诊断现状\n"
-            "1. 使用 `get_directory` 获取当前Wiki完整目录树\n"
-            "2. 使用 `run_health_check` 检查结构健康度，关注warnings和suggestions\n"
-            "3. 识别以下问题：\n"
-            "   - 空目录（无子页面）\n"
-            "   - 过短页面（内容不足20字）\n"
-            "   - 过长页面（内容超过500字）\n"
-            "   - 重叠页面（主题相似的兄弟页面）\n\n"
-            "### 第二步：制定整理方案\n"
-            "1. 标记需要合并的页面组（基于合并原则判断）\n"
-            "2. 标记需要拆分的页面（内容过长且包含多个独立主题）\n"
-            "3. 标记需要删除的空目录\n"
-            "4. 确定目标目录结构\n\n"
-            "### 第三步：执行整理\n"
-            "1. 读取待合并页面：使用 `read_memory` 获取完整内容\n"
-            "2. 合并内容：使用 `write_memory` 以merge模式写入目标页面\n"
-            "3. 删除冗余页面：合并完成后用 `write_memory` 覆盖为重定向说明\n"
-            "4. 创建新目录：使用 `create_directory` 建立新分类\n"
-            "5. 迁移内容：将拆分出的子主题 `write_memory` 到新路径\n"
-            "6. 更新摘要：每次修改后确保summary准确反映页面内容\n\n"
-            "### 第四步：验证整理结果\n"
-            "1. 再次 `run_health_check` 确认无新增错误\n"
-            "2. `get_directory` 确认目录结构符合预期\n"
-            "3. `read_memory` 抽检关键页面内容完整性\n\n"
-            "## 整理触发时机\n"
-            "- 用户明确要求整理Wiki\n"
-            "- `run_health_check` 报告3个以上warnings\n"
-            "- 用户写入新记忆后，检测到潜在的结构冲突\n"
-            "- 定期整理（建议每周一次）\n\n"
+            "### 第一步：扫描目录结构\n"
+            "- 从根目录开始，递归遍历所有目录和页面\n"
+            "- 记录每个目录下的页面数量和子目录数量\n"
+            "- 识别空目录（无子目录且无页面）和层级过深的目录（超过5层）\n\n"
+            "### 第二步：检查单篇规范\n"
+            "- 找出内容超过500字的页面，标记为待拆分候选\n"
+            "- 找出内容不足20字的页面，标记为待归并候选\n\n"
+            "### 第三步：检查归并需求\n"
+            "- 遍历同一目录下的所有页面，比较主题重叠度\n"
+            "- 依据\"记忆管理规则\"中的合并原则，标记需合并的页面组\n\n"
+            "### 第四步：执行整理\n"
+            "- 对待归并页面：合并到信息更完整的页面，删除冗余页面\n"
+            "- 对待拆分页面：按子主题拆分为子页面，原页面保留概览\n"
+            "- 对空目录：直接删除\n"
+            "- 对层级过深的目录：提升深层页面到更合理层级\n\n"
+            "### 第五步：验证与收尾\n"
+            "- 确认Front Matter字段完整\n"
+            "- 确认目录命名规范\n"
+            "- 确认无孤立页面\n\n"
             "## 注意事项\n"
             "- 整理前务必确认快照机制已启用，确保可恢复\n"
             "- 一次整理操作涉及的页面不超过10篇，避免大规模变动\n"
             "- 核心提示词文件（一级目录下.md文件）不参与整理归并\n"
-            "- 整理过程中如发现用户偏好信息，应更新到"用户偏好习惯.md""
+            "- 整理过程中如发现用户偏好信息，应更新到\"用户偏好习惯.md\""
         )
     }
 }
@@ -715,33 +795,20 @@ def ensure_core_prompts(wiki_root: Path):
     for filename, prompt_data in CORE_PROMPTS.items():
         file_path = wiki_root / filename
         if file_path.exists():
-            logger.debug(f"核心提示词文件已存在，跳过: {filename}")
+            logger.info(f"核心提示词文件已存在: {file_path}")
             continue
 
-        front_matter = {
-            "title": prompt_data["title"],
-            "type": "corepage",
-            "level": 1,
-            "summary": prompt_data["summary"],
-            "tags": prompt_data["tags"],
-            "created_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat()
-        }
+        post = frontmatter.Post(prompt_data["content"])
+        post.metadata["title"] = prompt_data["title"]
+        post.metadata["type"] = "corepage"
+        post.metadata["level"] = 1
+        post.metadata["summary"] = prompt_data["summary"]
+        post.metadata["tags"] = prompt_data["tags"]
 
-        yaml_header = "---\n"
-        for key, value in front_matter.items():
-            if isinstance(value, list):
-                yaml_header += f'{key}: {json.dumps(value, ensure_ascii=False)}\n'
-            elif isinstance(value, str):
-                yaml_header += f'{key}: "{value}"\n'
-            else:
-                yaml_header += f"{key}: {value}\n"
-        yaml_header += "---\n"
-
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(yaml_header + "\n" + prompt_data["content"] + "\n")
-
-        logger.info(f"已创建核心提示词文件: {filename}")
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(file_path, "wb") as f:
+            frontmatter.dump(post, f)
+        logger.info(f"已创建核心提示词文件: {file_path}")
 
 
 def initialize(config_path: Path, wiki_root: Path):
@@ -757,89 +824,164 @@ def initialize(config_path: Path, wiki_root: Path):
 ### 7.3 主入口（main.py）
 
 ```python
+import json
 import logging
-import logging.handlers
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from fastmcp import FastMCP
-from openmem.config import Config
-from openmem.file_store import FileStore
-from openmem.snapshot_manager import SnapshotManager
-from openmem.write_engine import WriteEngine
-from openmem.read_engine import ReadEngine
-from openmem.health_engine import HealthEngine
-from openmem.initializer import initialize
 
-CONFIG_PATH = Path.home() / ".config" / "openmem" / "openmem.json"
+from fastmcp import FastMCP
+
+from openmem.initializer import initialize, DEFAULT_CONFIG
+from openmem.store import WikiStore
+
 mcp = FastMCP("Personal Wiki Memory")
 
-initialize(CONFIG_PATH)
+config_path = Path.home() / ".config" / "openmem" / "openmem.json"
 
-config = Config(str(CONFIG_PATH))
 
-file_store = FileStore(config.wiki_root, config.max_depth)
-snapshot_mgr = SnapshotManager(
-    wiki_root=config.wiki_root,
-    enabled=config.snapshot_enabled,
-    cleanup_interval_minutes=config.snapshot_cleanup_interval,
-    retention_days=config.snapshot_retention_days
-)
-write_engine = WriteEngine(file_store, snapshot_mgr)
-read_engine = ReadEngine(file_store)
-health_engine = HealthEngine(file_store)
+def load_config() -> dict:
+    if config_path.exists():
+        with open(config_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return DEFAULT_CONFIG
+
+
+def setup_logging(config: dict):
+    log_cfg = config.get("logging", DEFAULT_CONFIG["logging"])
+    level = getattr(logging, log_cfg.get("level", "INFO").upper(), logging.INFO)
+    fmt = log_cfg.get("format", "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
+
+    handlers = [logging.StreamHandler()]
+
+    if log_cfg.get("file_enabled", True):
+        log_path = Path(log_cfg.get("file_path", "./logs/openmem.log"))
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            str(log_path),
+            maxBytes=log_cfg.get("max_file_size_mb", 10) * 1024 * 1024,
+            backupCount=log_cfg.get("backup_count", 5),
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(logging.Formatter(fmt))
+        handlers.append(file_handler)
+
+    logging.basicConfig(level=level, format=fmt, handlers=handlers)
+
+
+config = load_config()
+setup_logging(config)
+
+wiki_root = Path(config.get("wiki_root", "./wiki"))
+initialize(config_path, wiki_root)
+
+store = WikiStore(wiki_root, max_depth=config.get("max_depth", 7), snapshot_cfg=config.get("snapshot"))
 
 
 @mcp.tool()
 def get_directory(path: str = "/") -> str:
-    return file_store.read_directory_tree(path)
+    """
+    获取指定目录的层级文件列表
+
+    Args:
+        path: 目录路径，默认根目录
+
+    Returns:
+        目录结构和子条目列表（含每个条目的title、summary、type、level）
+    """
+    return store.get_directory(path)
+
 
 @mcp.tool()
 def read_memory(path: str) -> str:
-    return file_store.read_page(path)
+    """
+    读取指定路径的完整Wiki页面内容
+
+    Args:
+        path: 页面完整路径，如"/00-个人/学习/Python学习笔记"
+
+    Returns:
+        页面完整内容，包括Front Matter
+    """
+    return store.read_memory(path)
+
 
 @mcp.tool()
-def write_memory(content: str, path: str = None, mode: str = "merge", tags: list[str] = None) -> str:
-    principles = file_store.read_all_core_principles()
-    exists = path and file_store.page_exists(path)
-    if exists:
-        snapshot_mgr.create_snapshot(path)
-        file_store.update_page(path, content, mode, principles)
-        return path
-    else:
-        file_store.ensure_directory_exists(path)
-        return file_store.write_memory(content, path, tags, principles)
+def write_memory(content: str, path: str = None, tags: list[str] = None) -> str:
+    """
+    写入记忆（缺目录自动创建，更新前自动快照）
 
-@mcp.tool()
-def get_core_principles() -> str:
-    return file_store.read_all_core_principles()
+    Args:
+        content: 要写入的记忆内容
+        path: 目标路径，如"/00-个人/学习/Python学习笔记"。为空时自动分类
+        tags: 可选的标签列表
+
+    Returns:
+        最终页面路径
+    """
+    return store.write_memory(content=content, path=path, tags=tags)
 
 
-if __name__ == "__main__":
-    mcp.run()
+@mcp.prompt(name="core_principles", description="记忆系统核心提示词，供LLM调度决策")
+def core_principles_prompt() -> str:
+    """
+    获取所有核心提示词（一级目录下所有.md文件的内容合集），供客户端LLM用于调度决策
+
+    Returns:
+        所有核心提示词的完整内容，按文件名排列拼接
+    """
+    return store.get_core_principles()
 ```
 
 ### 7.4 启动流程
 
+```mermaid
+flowchart TD
+    A[main.py 模块加载] --> B[load_config<br/>加载配置文件]
+    B --> B1{配置文件是否存在?}
+    B1 -->|是| B2[读取 openmem.json]
+    B1 -->|否| B3[使用 DEFAULT_CONFIG]
+    B2 --> C[setup_logging<br/>配置日志系统]
+    B3 --> C
+    C --> C1[创建控制台 Handler]
+    C --> C2{file_enabled?}
+    C2 -->|是| C3[创建 RotatingFileHandler]
+    C2 -->|否| C4[跳过文件日志]
+    C3 --> D[initialize<br/>启动初始化]
+    C4 --> D
+    D --> D1[ensure_config<br/>确保配置文件存在]
+    D1 --> D2[ensure_wiki_root<br/>确保Wiki根目录存在]
+    D2 --> D3[ensure_core_prompts<br/>确保核心提示词文件存在]
+    D3 --> E[创建 WikiStore 实例]
+    E --> F[注册 MCP 工具接口]
+    F --> G[服务就绪，等待客户端连接]
 ```
-MCP启动
-  │
-  ├─ 1. initialize(config_path, wiki_root)
-  │     ├─ ensure_config()      → 若 openmem.json 不存在，创建默认配置
-  │     ├─ ensure_wiki_root()   → 若 Wiki根目录不存在，自动创建
-  │     └─ ensure_core_prompts()→ 若核心提示词文件不存在，逐个创建
-  │         ├─ 记忆管理规则.md
-  │         ├─ 用户偏好习惯.md
-  │         ├─ Agent行为指南.md
-  │         └─ Wiki整理指南.md
-  │
-  ├─ 2. Config.load()           → 读取配置
-  ├─ 3. FileStore()             → 初始化文件存储
-  ├─ 4. SnapshotManager()       → 初始化快照管理
-  ├─ 5. WriteEngine()           → 初始化写入引擎
-  ├─ 6. ReadEngine()            → 初始化读取引擎
-  ├─ 7. HealthEngine()          → 初始化健康检查引擎
-  │
-  └─ 8. mcp.run()               → 启动MCP服务
-```
+
+**详细步骤**：
+
+1. **加载配置**（`load_config`）
+   - 检查 `~/.config/openmem/openmem.json` 是否存在
+   - 存在则读取，不存在则使用 `DEFAULT_CONFIG` 默认值
+
+2. **配置日志**（`setup_logging`）
+   - 根据配置设置日志级别和格式
+   - 始终启用控制台输出（stderr）
+   - 若 `file_enabled` 为 true，创建 `RotatingFileHandler`，按大小轮转
+
+3. **启动初始化**（`initialize`）
+   - `ensure_config`：若配置文件不存在，自动创建默认配置文件
+   - `ensure_wiki_root`：创建Wiki根目录（含父目录）
+   - `ensure_core_prompts`：遍历 `CORE_PROMPTS` 字典，逐一检查核心提示词文件是否存在，不存在则自动创建（含Front Matter）
+
+4. **创建存储实例**
+   - 实例化 `WikiStore`，传入 `wiki_root`、`max_depth`、`snapshot_cfg` 参数
+   - WikiStore 内部初始化快照清理定时器（若快照启用）
+
+5. **注册MCP接口**
+   - 注册 `get_directory`、`read_memory`、`write_memory` 三个核心业务工具接口
+   - 注册 `core_principles_prompt` prompt接口，暴露核心提示词给客户端LLM用于调度决策
+
+6. **服务就绪**
+   - FastMCP 实例启动，通过 stdio 等传输方式等待客户端连接
 
 ### 7.5 安装
 
@@ -863,7 +1005,7 @@ pip install -e .
 3. **零锁定**：所有数据都是标准Markdown，随时可用任何编辑器打开
 4. **完美Obsidian集成**：不需要任何插件，所有功能都是Obsidian原生支持
 5. **强制规范**：所有文件都遵循统一格式，结构清晰、易于维护
-6. **记忆不重叠**：核心提示词驱动合并判断，确保内容精简不冗余
+6. **记忆不重叠**：核心提示词通过MCP Prompt直接暴露给客户端LLM，由LLM驱动合并与分类决策，确保内容精简不冗余
 7. **安全可恢复**：每次改动自动快照，可配置保留策略
 
 
@@ -1018,7 +1160,6 @@ FastMCP 使用 Pydantic 的 `TypeAdapter` 自动从 Python 类型注解生成 JS
 def write_memory(
     content: str,                                    # 必填，类型string
     path: str = None,                                # 选填，类型string|null
-    mode: str = "merge",                             # 选填，默认"merge"
     tags: list[str] = None,                          # 选填，类型array of string
 ) -> str:
     pass
@@ -1031,7 +1172,6 @@ def write_memory(
     "properties": {
         "content": {"type": "string", "description": "要写入的记忆内容"},
         "path": {"type": "string", "description": "目标路径", "default": null},
-        "mode": {"type": "string", "description": "更新模式", "default": "merge"},
         "tags": {"type": "array", "items": {"type": "string"}, "description": "标签列表"}
     },
     "required": ["content"]
