@@ -25,6 +25,8 @@ DEFAULT_CONFIG = {
     },
 }
 
+
+# CORE_PROMPTS 改为 rule.md 内容
 CORE_PROMPTS = {
     "记忆管理规则.md": {
         "title": "记忆管理规则",
@@ -147,5 +149,5 @@ def initialize(config_path: Path, wiki_root: Path):
     logger.info("开始启动初始化...")
     ensure_config(config_path)
     ensure_wiki_root(wiki_root)
-    ensure_core_prompts(wiki_root)
+    # ensure_core_prompts(wiki_root)
     logger.info("启动初始化完成")
