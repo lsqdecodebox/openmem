@@ -67,7 +67,7 @@ openmem
 |------|------|------|
 | `get_directory` | `path`（默认 `/`） | 获取目录结构树，含每个条目的 title/summary/type/level |
 | `read_memory` | `path` | 读取页面完整内容（含 Front Matter） |
-| `write_memory` | `content`, `path?`, `tags?` | 写入记忆；path 为空时返回 `need_path` 提示；更新前自动快照；缺目录自动创建 |
+| `write_memory` | `content`, `path?`, `tags?`, `summary?` | 覆盖写入记忆；path 为空时返回 `need_path` 提示；更新前自动快照；缺目录自动创建；summary 为空时自动生成 |
 
 ### 提示词（Prompts）
 
@@ -144,7 +144,7 @@ tags:
 ## 核心机制
 
 - **写入前快照** — 更新已有页面时，自动将旧版复制到 `.snapshots/` 下，按 ISO 时间戳命名
-- **内容合并** — 新内容追加到现有正文，用 `---` 分隔；若新内容已包含在原文中则跳过
+- **覆盖写入** — 新内容直接覆盖现有正文，不做合并
 - **缺目录自动创建** — 写入路径的父目录不存在时逐级创建
 - **路径安全校验** — 防路径穿越，目录深度不超过 7 层
 

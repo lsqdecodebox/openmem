@@ -87,19 +87,20 @@ def read_memory(path: str) -> str:
 
 @mcp.tool()
 def write_memory(
-    content: str, path: str | None = None, tags: list[str] | None = None
+    content: str, path: str | None = None, tags: list[str] | None = None, summary: str | None = None
 ) -> str:
-    """写入记忆（缺目录自动创建，更新前自动快照）
+    """写入记忆（覆盖写入，缺目录自动创建，更新前自动快照）
 
     Args:
         content: 要写入的记忆内容
-        path: 目标路径，如"/00-个人/学习/Python学习笔记"。为空时自动分类
+        path: 目标路径，如"/00-个人/学习/Python学习笔记"。为空时返回need_path提示
         tags: 可选的标签列表
+        summary: 可选的页面摘要，为空时自动生成
 
     Returns:
         最终页面路径
     """
-    return store.write_memory(content=content, path=path, tags=tags)
+    return store.write_memory(content=content, path=path, tags=tags, summary=summary)
 
 
 @mcp.prompt(name="core_principles", description="记忆系统核心提示词，供LLM调度决策")

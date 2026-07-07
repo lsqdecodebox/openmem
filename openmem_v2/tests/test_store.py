@@ -90,20 +90,24 @@ class TestWikiStore:
         _create_md(
             self.wiki_root / "01-工作" / "项目A.md",
             "原始内容",
-            {"title": "项目A", "type": "page", "level": 2, "summary": "原始", "tags": []},
+            {"title": "项目A", "type": "page", "level": 2, "summary": "原始", "tags": ["旧标签"]},
         )
 
         store_with_snapshot = WikiStore(
             self.wiki_root, max_depth=7, snapshot_cfg={"enabled": True}
         )
         result = store_with_snapshot.write_memory(
-            content="新增内容",
+            content="新内容",
             path="/01-工作/项目A",
+            tags=["新标签"],
+            summary="新摘要",
         )
 
         post = parse_frontmatter(self.wiki_root / "01-工作" / "项目A.md")
-        assert "原始内容" in post.content
-        assert "新增内容" in post.content
+        assert post.content.strip() == "新内容"
+        assert "原始内容" not in post.content
+        assert post.metadata["tags"] == ["新标签"]
+        assert post.metadata["summary"] == "新摘要"
 
         snapshots_dir = self.wiki_root / ".snapshots"
         if snapshots_dir.exists():
@@ -122,6 +126,29 @@ class TestWikiStore:
 
         result_dict = json.loads(result)
         assert result_dict["status"] == "need_path"
+
+    def test_write_memory_with_summary(self):
+        result = self.store.write_memory(
+            content="带摘要的内容",
+            path="/01-工作/带摘要",
+            summary="自定义摘要",
+        )
+
+        file_path = self.wiki_root / "01-工作" / "带摘要.md"
+        assert file_path.exists()
+        post = parse_frontmatter(file_path)
+        assert post.metadata["summary"] == "自定义摘要"
+
+    def test_write_memory_summary_auto_generated(self):
+        result = self.store.write_memory(
+            content="无摘要内容",
+            path="/01-工作/无摘要",
+        )
+
+        file_path = self.wiki_root / "01-工作" / "无摘要.md"
+        assert file_path.exists()
+        post = parse_frontmatter(file_path)
+        assert post.metadata["summary"] != ""
 
     def test_get_core_principles(self):
         result = self.store.get_core_principles()

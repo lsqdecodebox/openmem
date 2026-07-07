@@ -4,7 +4,6 @@ from openmem.utils import (
     validate_path_depth,
     sanitize_path,
     compute_level,
-    merge_content,
     count_content_chars,
     validate_frontmatter,
     is_core_page,
@@ -49,28 +48,6 @@ def test_compute_level():
     assert compute_level("/a") == 1
     assert compute_level("/a/b") == 2
     assert compute_level("/a/b/c") == 3
-
-
-def test_merge_content_append():
-    result = merge_content("原始内容", "新增内容")
-    assert "原始内容" in result
-    assert "新增内容" in result
-    assert "---" in result
-
-
-def test_merge_content_duplicate():
-    result = merge_content("原始内容", "原始内容")
-    assert result.count("原始内容") == 1
-
-
-def test_merge_content_empty_new():
-    result = merge_content("原始内容", "")
-    assert result == "原始内容"
-
-
-def test_merge_content_empty_existing():
-    result = merge_content("", "新内容")
-    assert result == "新内容"
 
 
 def test_count_content_chars():

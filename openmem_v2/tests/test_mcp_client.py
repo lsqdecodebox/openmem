@@ -32,10 +32,10 @@ def _build_test_mcp(wiki_root: Path) -> FastMCP:
 
     @mcp.tool()
     def write_memory(
-        content: str, path: str | None = None, tags: list[str] | None = None
+        content: str, path: str | None = None, tags: list[str] | None = None, summary: str | None = None
     ) -> str:
-        """写入记忆（缺目录自动创建，更新前自动快照）"""
-        return store.write_memory(content=content, path=path, tags=tags)
+        """写入记忆（覆盖写入，缺目录自动创建，更新前自动快照）"""
+        return store.write_memory(content=content, path=path, tags=tags, summary=summary)
 
     @mcp.prompt(name="core_principles", description="记忆系统核心提示词，供LLM调度决策")
     def core_principles_prompt() -> str:
@@ -184,7 +184,6 @@ async def test_client_full_workflow(mcp_server: FastMCP, wiki_root: Path):
             "read_memory", {"path": "/01-工作/项目A"}
         )
         read_updated_text = _extract_text(read_updated)
-        assert "项目进度记录" in read_updated_text
         assert "本周新增进展" in read_updated_text
 
         principles = await client.get_prompt("core_principles")

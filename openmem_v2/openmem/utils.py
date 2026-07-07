@@ -79,22 +79,6 @@ def build_frontmatter(
     }
 
 
-def merge_content(existing_body: str, new_content: str) -> str:
-    existing = existing_body.strip()
-    new = new_content.strip()
-
-    if not new:
-        return existing
-
-    if not existing:
-        return new
-
-    if new in existing:
-        return existing
-
-    return existing + "\n\n---\n\n" + new
-
-
 def count_content_chars(content: str) -> int:
     plain = _strip_markdown(content)
     return len(plain.strip())

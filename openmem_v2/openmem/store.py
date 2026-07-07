@@ -11,7 +11,6 @@ from openmem.utils import (
     validate_path_depth,
     sanitize_path,
     parse_frontmatter,
-    merge_content,
     compute_level,
     count_content_chars,
     _strip_markdown,
@@ -78,6 +77,7 @@ class WikiStore:
         content: str,
         path: str | None = None,
         tags: list[str] | None = None,
+        summary: str | None = None,
     ) -> str:
         if path is None or path.strip() == "":
             return json.dumps(
@@ -97,38 +97,33 @@ class WikiStore:
             )
 
         file_path = self._resolve_page_path(path)
+        final_summary = summary if summary is not None else self._generate_summary(content)
 
         if file_path.exists():
             self._create_snapshot(file_path)
 
             existing = parse_frontmatter(file_path)
-            merged_content = merge_content(existing.content, content)
-            merged_tags = list(
-                set(existing.metadata.get("tags", []) + (tags or []))
-            )
-
-            existing.metadata["tags"] = merged_tags
-            existing.metadata["summary"] = self._generate_summary(merged_content)
-            existing.content = merged_content
+            existing.metadata["tags"] = tags if tags is not None else existing.metadata.get("tags", [])
+            existing.metadata["summary"] = final_summary
+            existing.content = content
 
             with open(file_path, "w", encoding="utf-8") as f:
                 frontmatter.dump(existing, f)
 
-            logger.info(f"更新页面: {path}, 模式: merge")
+            logger.info(f"更新页面: {path}, 模式: overwrite")
         else:
             file_path.parent.mkdir(parents=True, exist_ok=True)
             logger.info(f"自动创建目录: {file_path.parent}")
 
             level = compute_level(path)
             title = self._extract_title(path)
-            summary = self._generate_summary(content)
 
             post = frontmatter.Post(content)
             post.metadata = {
                 "title": title,
                 "type": "page",
                 "level": level,
-                "summary": summary,
+                "summary": final_summary,
                 "tags": tags or [],
             }
 
