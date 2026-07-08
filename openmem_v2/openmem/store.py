@@ -37,15 +37,17 @@ class WikiStore:
             self.snapshot_enabled = snapshot_cfg.get("enabled", True)
             self.cleanup_interval = snapshot_cfg.get("cleanup_interval_minutes", 10)
             self.retention_days = snapshot_cfg.get("retention_days", 7)
+            self.schedule_enabled = snapshot_cfg.get("schedule_enabled", True)
         else:
             self.snapshot_enabled = True
             self.cleanup_interval = 10
             self.retention_days = 7
+            self.schedule_enabled = True
 
-        self._cleanup_timer: threading.Timer | None = None
+        self._timer: threading.Timer | None = None
 
         if self.snapshot_enabled:
-            self._start_cleanup_timer()
+            self._start_timer()
 
     def get_directory(self, path: str = "/") -> str:
         target_dir = self._resolve_path(path)
@@ -223,21 +225,66 @@ class WikiStore:
 
         logger.debug(f"创建快照: {snapshot_path}")
 
-    def _start_cleanup_timer(self):
-        def cleanup():
+    def _start_timer(self):
+        def tick():
+            if self.schedule_enabled:
+                self._scheduled_snapshot()
             self._cleanup_snapshots()
-            self._cleanup_timer = threading.Timer(
-                self.cleanup_interval * 60, cleanup
+            self._timer = threading.Timer(
+                self.cleanup_interval * 60, tick
             )
-            self._cleanup_timer.daemon = True
-            self._cleanup_timer.start()
+            self._timer.daemon = True
+            self._timer.start()
 
-        self._cleanup_timer = threading.Timer(
-            self.cleanup_interval * 60, cleanup
+        self._timer = threading.Timer(
+            self.cleanup_interval * 60, tick
         )
-        self._cleanup_timer.daemon = True
-        self._cleanup_timer.start()
-        logger.info(f"快照清理定时器已启动，间隔: {self.cleanup_interval}分钟")
+        self._timer.daemon = True
+        self._timer.start()
+        logger.info(f"快照定时器已启动，间隔: {self.cleanup_interval}分钟")
+
+    def _scheduled_snapshot(self):
+        snapshot_count = 0
+        for md_file in self.wiki_root.rglob("*.md"):
+            try:
+                rel = md_file.relative_to(self.wiki_root)
+            except ValueError:
+                continue
+
+            if str(rel).startswith(".snapshots") or rel.name.startswith("."):
+                continue
+
+            latest = self._get_latest_snapshot_time(md_file)
+            file_mtime = datetime.fromtimestamp(md_file.stat().st_mtime)
+
+            if latest is None or file_mtime > latest:
+                self._create_snapshot(md_file)
+                snapshot_count += 1
+                logger.info(f"定时快照: {rel}")
+
+        if snapshot_count > 0:
+            logger.info(f"定时快照完成，共创建{snapshot_count}个快照")
+
+    def _get_latest_snapshot_time(self, file_path: Path) -> datetime | None:
+        try:
+            rel_path = file_path.relative_to(self.wiki_root)
+        except ValueError:
+            return None
+
+        snapshot_dir = self.wiki_root / ".snapshots" / rel_path.with_suffix("")
+        if not snapshot_dir.exists():
+            return None
+
+        latest_mtime = None
+        for snap_file in snapshot_dir.glob("*.md"):
+            try:
+                mtime = datetime.fromtimestamp(snap_file.stat().st_mtime)
+                if latest_mtime is None or mtime > latest_mtime:
+                    latest_mtime = mtime
+            except OSError:
+                continue
+
+        return latest_mtime
 
     def _cleanup_snapshots(self):
         snapshots_dir = self.wiki_root / ".snapshots"

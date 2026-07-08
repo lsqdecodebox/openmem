@@ -31,7 +31,7 @@ def setup_logging(config: dict):
     handlers: list[logging.Handler] = [logging.StreamHandler()]
 
     if log_cfg.get("file_enabled", False):
-        log_path = Path(log_cfg.get("file_path", "./logs/openmem.log"))
+        log_path = Path(log_cfg.get("file_path", "./logs/openmem.log")).expanduser()
         log_path.parent.mkdir(parents=True, exist_ok=True)
         file_handler = RotatingFileHandler(
             log_path,
@@ -49,7 +49,7 @@ config = load_config()
 setup_logging(config)
 
 logger = logging.getLogger(__name__)
-wiki_root = Path(config.get("wiki_root", "./wiki"))
+wiki_root = Path(config.get("wiki_root", "./wiki")).expanduser()
 initialize(CONFIG_PATH, wiki_root)
 
 store = WikiStore(
@@ -61,7 +61,7 @@ store = WikiStore(
 
 @mcp.tool()
 def get_directory(path: str = "/") -> str:
-    """获取指定目录的层级文件列表
+    """获取记忆中指定目录的层级文件列表，即记忆概要
 
     Args:
         path: 目录路径，默认根目录
@@ -74,7 +74,7 @@ def get_directory(path: str = "/") -> str:
 
 @mcp.tool()
 def read_memory(path: str) -> str:
-    """读取指定路径的完整Wiki页面内容
+    """读取指定路径的完整Wiki页面内容，即读取记忆
 
     Args:
         path: 页面完整路径，如"/00-个人/学习/Python学习笔记"
@@ -89,7 +89,7 @@ def read_memory(path: str) -> str:
 def write_memory(
     content: str, path: str | None = None, tags: list[str] | None = None, summary: str | None = None
 ) -> str:
-    """写入记忆（覆盖写入，缺目录自动创建，更新前自动快照）
+    """覆盖写入指定路径的完整Wiki页面内容，即写入记忆
 
     Args:
         content: 要写入的记忆内容

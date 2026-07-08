@@ -7,18 +7,19 @@ import frontmatter
 logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG = {
-    "wiki_root": "./wiki",
+    "wiki_root": "~/.config/openmem/wiki",
     "max_depth": 7,
     "snapshot": {
         "enabled": True,
         "cleanup_interval_minutes": 10,
         "retention_days": 7,
+        "schedule_enabled": True,
     },
     "default_tags": [],
     "logging": {
         "level": "INFO",
         "file_enabled": True,
-        "file_path": "./logs/openmem.log",
+        "file_path": "~/.config/openmem/logs/openmem.log",
         "max_file_size_mb": 10,
         "backup_count": 5,
         "format": "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
