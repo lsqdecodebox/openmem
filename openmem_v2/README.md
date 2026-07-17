@@ -1,4 +1,4 @@
-# OpenMem v2
+# OpenMem 
 
 基于 MCP 协议的个人 Wiki 记忆系统。LLM 客户端（Claude Desktop / OpenCode 等）通过 MCP Tool/Prompt 接口读写 Wiki 页面，实现持久化记忆。
 
@@ -16,7 +16,7 @@ pip install -e .
 pip install -e ".[dev]"
 ```
 
-### 启动服务
+### 独立使用
 
 ```bash
 openmem
@@ -24,7 +24,7 @@ openmem
 
 服务以 stdio 模式运行，等待 MCP 客户端连接。
 
-### 连接客户端
+### 客户端std模式使用
 
 **Claude Desktop** — 编辑 `claude_desktop_config.json`：
 
@@ -45,11 +45,20 @@ openmem
 {
   "mcp": {
     "openmem": {
+      "type": "local",
       "command": "openmem"
     }
   }
 }
 ```
+
+智能体提示词配置：将system_prompt.md的信息配置至系统提示词上，例如 agents.md
+
+
+### 知识库可视化
+
+使用obsidian软件打开 wiki_root文件夹，默认位于 `~/.config/openmem/wiki `
+
 
 ## 首次启动
 
@@ -57,7 +66,7 @@ openmem
 
 1. 生成配置文件 `~/.config/openmem/openmem.json`
 2. 创建 Wiki 根目录（默认 `./wiki`）
-3. 在根目录下生成 4 个核心提示词文件
+
 
 ## MCP 接口
 
@@ -69,11 +78,7 @@ openmem
 | `read_memory` | `path` | 读取页面完整内容（含 Front Matter） |
 | `write_memory` | `content`, `path?`, `tags?`, `summary?` | 覆盖写入记忆；path 为空时返回 `need_path` 提示；更新前自动快照；缺目录自动创建；summary 为空时自动生成 |
 
-### 提示词（Prompts）
 
-| Prompt | 说明 |
-|--------|------|
-| `core_principles` | 返回 Wiki 根目录下所有一级 .md 文件内容合集，供 LLM 决策分类/写入位置 |
 
 ## 配置
 
@@ -113,7 +118,7 @@ openmem
 
 ```
 wiki/                          ← wiki_root
-├── 记忆管理规则.md             ← 核心提示词（自动生成）
+├── 记忆管理规则.md             ← 核心提示词 
 ├── 用户偏好习惯.md
 ├── Agent行为指南.md
 ├── Wiki整理指南.md
