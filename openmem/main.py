@@ -103,6 +103,42 @@ def write_memory(
     return store.write_memory(content=content, path=path, tags=tags, summary=summary)
 
 
+@mcp.tool()
+def write_asset(
+    source: str,
+    path: str,
+    filename: str,
+    type: str = "files",
+    overwrite: bool = False,
+) -> str:
+    """写入图片、文件、视频等二进制资料到记忆中, 以下样例 最终路径为"files/01-工作/项目A/diagram.png"
+
+    Args:
+        source: 本地文件路径，工具会读取该文件内容并写入记忆中
+        path: 存储子路径，如"01-工作/项目A"
+        filename: 文件名，如"diagram.png"
+        type: 资产类型，可选: images, files, videos, 默认files
+        overwrite: 是否覆盖已有文件，默认False
+
+    Returns:
+        写入结果，包含状态、路径、文件名、类型、大小
+    """
+    return store.write_asset(source=source, path=path, filename=filename, type=type, overwrite=overwrite)
+
+
+@mcp.tool()
+def read_asset(path: str) -> str:
+    """读取记忆中已有的图片、文件、视频等资产的本地路径
+
+    Args:
+        path: 资产相对路径，如"images/01-工作/项目A/diagram.png"
+
+    Returns:
+        资产信息，包含绝对路径、相对路径、文件大小
+    """
+    return store.read_asset(path=path)
+
+
 @mcp.prompt(name="core_principles", description="记忆系统核心提示词，供LLM调度决策")
 def core_principles_prompt() -> str:
     """获取所有核心提示词（一级目录下所有.md文件的内容合集），供客户端LLM用于调度决策

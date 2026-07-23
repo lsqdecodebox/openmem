@@ -1,4 +1,4 @@
-# OpenMem 
+# OpenMem
 
 基于 MCP 协议的个人 Wiki 记忆系统。LLM 客户端（Claude Desktop / OpenCode 等）通过 MCP Tool/Prompt 接口读写 Wiki 页面，实现持久化记忆。
 
@@ -54,11 +54,9 @@ openmem
 
 智能体提示词配置：将system_prompt.md的信息配置至系统提示词上，例如 agents.md
 
-
 ### 知识库可视化
 
 使用obsidian软件打开 wiki_root文件夹，默认位于 `~/.config/openmem/wiki `
-
 
 ## 首次启动
 
@@ -67,18 +65,15 @@ openmem
 1. 生成配置文件 `~/.config/openmem/openmem.json`
 2. 创建 Wiki 根目录（默认 `./wiki`）
 
-
 ## MCP 接口
 
 ### 工具（Tools）
 
-| 工具 | 参数 | 说明 |
-|------|------|------|
-| `get_directory` | `path`（默认 `/`） | 获取目录结构树，含每个条目的 title/summary/type/level |
-| `read_memory` | `path` | 读取页面完整内容（含 Front Matter） |
-| `write_memory` | `content`, `path?`, `tags?`, `summary?` | 覆盖写入记忆；path 为空时返回 `need_path` 提示；更新前自动快照；缺目录自动创建；summary 为空时自动生成 |
-
-
+| 工具              | 参数                                      | 说明                                                               |
+| --------------- | --------------------------------------- | ---------------------------------------------------------------- |
+| `get_directory` | `path`（默认 `/`）                          | 获取目录结构树，含每个条目的 title/summary/type/level                          |
+| `read_memory`   | `path`                                  | 读取页面完整内容（含 Front Matter）                                         |
+| `write_memory`  | `content`, `path?`, `tags?`, `summary?` | 覆盖写入记忆；path 为空时返回 `need_path` 提示；更新前自动快照；缺目录自动创建；summary 为空时自动生成 |
 
 ## 配置
 
@@ -105,14 +100,14 @@ openmem
 }
 ```
 
-| 字段 | 默认值 | 说明 |
-|------|--------|------|
-| `wiki_root` | `./wiki` | Wiki 文件存储根目录 |
-| `max_depth` | `7` | 目录最大层级深度 |
-| `snapshot.enabled` | `true` | 是否启用写入前快照 |
-| `snapshot.cleanup_interval_minutes` | `10` | 快照清理定时器间隔 |
-| `snapshot.retention_days` | `7` | 快照保留天数 |
-| `logging.file_enabled` | `true` | 是否启用日志文件输出 |
+| 字段                                  | 默认值      | 说明           |
+| ----------------------------------- | -------- | ------------ |
+| `wiki_root`                         | `./wiki` | Wiki 文件存储根目录 |
+| `max_depth`                         | `7`      | 目录最大层级深度     |
+| `snapshot.enabled`                  | `true`   | 是否启用写入前快照    |
+| `snapshot.cleanup_interval_minutes` | `10`     | 快照清理定时器间隔    |
+| `snapshot.retention_days`           | `7`      | 快照保留天数       |
+| `logging.file_enabled`              | `true`   | 是否启用日志文件输出   |
 
 ## 存储结构
 
@@ -161,13 +156,13 @@ pytest tests/ -v
 
 测试分层：
 
-| 文件 | 层级 | 说明 |
-|------|------|------|
-| `test_utils.py` | 工具函数 | 路径校验、合并、Front Matter 等 |
-| `test_initializer.py` | 初始化 | 配置/Wiki/核心提示词创建 |
-| `test_store.py` | 存储层 | WikiStore 读写、快照 |
-| `test_mcp_api.py` | MCP API | 直接调用 store 方法验证接口契约 |
-| `test_mcp_client.py` | MCP 客户端 | 通过 `fastmcp.Client` 模拟客户端连接，走完整协议链路 |
+| 文件                    | 层级      | 说明                                  |
+| --------------------- | ------- | ----------------------------------- |
+| `test_utils.py`       | 工具函数    | 路径校验、合并、Front Matter 等              |
+| `test_initializer.py` | 初始化     | 配置/Wiki/核心提示词创建                     |
+| `test_store.py`       | 存储层     | WikiStore 读写、快照                     |
+| `test_mcp_api.py`     | MCP API | 直接调用 store 方法验证接口契约                 |
+| `test_mcp_client.py`  | MCP 客户端 | 通过 `fastmcp.Client` 模拟客户端连接，走完整协议链路 |
 
 ## 项目结构
 
@@ -179,3 +174,9 @@ openmem/
 ├── store.py          # WikiStore：目录导航、页面读写、快照管理
 └── utils.py          # 工具函数：路径校验、Front Matter、合并策略
 ```
+
+
+
+## 其他资料
+
+https://gist.github.com/rohitg00/2067ab416f7bbe447c1977edaaa681e2

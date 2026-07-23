@@ -37,6 +37,22 @@ def _build_test_mcp(wiki_root: Path) -> FastMCP:
         """写入记忆（覆盖写入，缺目录自动创建，更新前自动快照）"""
         return store.write_memory(content=content, path=path, tags=tags, summary=summary)
 
+    @mcp.tool()
+    def write_asset(
+        source: str,
+        path: str,
+        filename: str,
+        type: str = "files",
+        overwrite: bool = False,
+    ) -> str:
+        """写入图片、文件、视频等二进制资料到记忆中"""
+        return store.write_asset(source=source, path=path, filename=filename, type=type, overwrite=overwrite)
+
+    @mcp.tool()
+    def read_asset(path: str) -> str:
+        """读取记忆中已有的图片、文件、视频等资产的本地路径"""
+        return store.read_asset(path=path)
+
     @mcp.prompt(name="core_principles", description="记忆系统核心提示词，供LLM调度决策")
     def core_principles_prompt() -> str:
         """获取所有核心提示词"""
@@ -66,6 +82,8 @@ async def test_client_list_tools(mcp_server: FastMCP):
     assert "get_directory" in tool_names
     assert "read_memory" in tool_names
     assert "write_memory" in tool_names
+    assert "write_asset" in tool_names
+    assert "read_asset" in tool_names
 
 
 @pytest.mark.asyncio
@@ -192,3 +210,205 @@ async def test_client_full_workflow(mcp_server: FastMCP, wiki_root: Path):
             if hasattr(msg.content, "text"):
                 principles_text += msg.content.text
         assert len(principles_text) > 0
+
+
+@pytest.mark.asyncio
+async def test_client_write_asset(mcp_server: FastMCP, wiki_root: Path):
+    import tempfile
+
+    raw_data = b"test binary data"
+
+    with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
+        f.write(raw_data)
+        temp_path = f.name
+
+    try:
+        async with Client(mcp_server) as client:
+            result = await client.call_tool(
+                "write_asset",
+                {
+                    "source": temp_path,
+                    "path": "01-工作/项目A",
+                    "filename": "test.bin",
+                    "type": "files",
+                },
+            )
+
+        result_text = _extract_text(result)
+        parsed = json.loads(result_text)
+        assert parsed["status"] == "ok"
+        assert parsed["type"] == "files"
+        assert parsed["filename"] == "test.bin"
+        assert parsed["size"] == len(raw_data)
+
+        saved_path = wiki_root / "files" / "01-工作" / "项目A" / "test.bin"
+        assert saved_path.exists()
+        assert saved_path.read_bytes() == raw_data
+    finally:
+        Path(temp_path).unlink(missing_ok=True)
+
+
+@pytest.mark.asyncio
+async def test_client_write_asset_images(mcp_server: FastMCP, wiki_root: Path):
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        f.write(b"fake png content")
+        temp_path = f.name
+
+    try:
+        async with Client(mcp_server) as client:
+            result = await client.call_tool(
+                "write_asset",
+                {
+                    "source": temp_path,
+                    "path": "01-工作/项目A",
+                    "filename": "diagram.png",
+                    "type": "images",
+                },
+            )
+
+        result_text = _extract_text(result)
+        parsed = json.loads(result_text)
+        assert parsed["status"] == "ok"
+        assert parsed["type"] == "images"
+
+        saved_path = wiki_root / "images" / "01-工作" / "项目A" / "diagram.png"
+        assert saved_path.exists()
+        assert saved_path.read_bytes() == b"fake png content"
+    finally:
+        Path(temp_path).unlink(missing_ok=True)
+
+
+@pytest.mark.asyncio
+async def test_client_write_asset_file_exists(mcp_server: FastMCP, wiki_root: Path):
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
+        f.write(b"data")
+        temp_path = f.name
+
+    try:
+        async with Client(mcp_server) as client:
+            await client.call_tool(
+                "write_asset",
+                {
+                    "source": temp_path,
+                    "path": "01-工作",
+                    "filename": "test.bin",
+                    "type": "files",
+                },
+            )
+            result = await client.call_tool(
+                "write_asset",
+                {
+                    "source": temp_path,
+                    "path": "01-工作",
+                    "filename": "test.bin",
+                    "type": "files",
+                    "overwrite": False,
+                },
+            )
+
+        result_text = _extract_text(result)
+        parsed = json.loads(result_text)
+        assert parsed["status"] == "file_exists"
+    finally:
+        Path(temp_path).unlink(missing_ok=True)
+
+
+@pytest.mark.asyncio
+async def test_client_write_asset_invalid_type(mcp_server: FastMCP, wiki_root: Path):
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
+        f.write(b"data")
+        temp_path = f.name
+
+    try:
+        async with Client(mcp_server) as client:
+            result = await client.call_tool(
+                "write_asset",
+                {
+                    "source": temp_path,
+                    "path": "01-工作",
+                    "filename": "test.bin",
+                    "type": "invalid",
+                },
+            )
+
+        result_text = _extract_text(result)
+        parsed = json.loads(result_text)
+        assert parsed["status"] == "error"
+    finally:
+        Path(temp_path).unlink(missing_ok=True)
+
+
+@pytest.mark.asyncio
+async def test_client_read_asset(mcp_server: FastMCP, wiki_root: Path):
+    import tempfile
+
+    raw_data = b"test binary data"
+
+    with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
+        f.write(raw_data)
+        temp_path = f.name
+
+    try:
+        async with Client(mcp_server) as client:
+            await client.call_tool(
+                "write_asset",
+                {
+                    "source": temp_path,
+                    "path": "01-工作",
+                    "filename": "readme.bin",
+                    "type": "files",
+                },
+            )
+
+            result = await client.call_tool(
+                "read_asset",
+                {"path": "files/01-工作/readme.bin"},
+            )
+
+        result_text = _extract_text(result)
+        parsed = json.loads(result_text)
+        assert parsed["status"] == "ok"
+        assert parsed["size"] == len(raw_data)
+        assert parsed["relative_path"] == "files/01-工作/readme.bin"
+        assert "files" in parsed["absolute_path"]
+        assert "readme.bin" in parsed["absolute_path"]
+    finally:
+        Path(temp_path).unlink(missing_ok=True)
+
+
+@pytest.mark.asyncio
+async def test_client_read_asset_not_exist(mcp_server: FastMCP):
+    async with Client(mcp_server) as client:
+        result = await client.call_tool(
+            "read_asset",
+            {"path": "images/nonexistent/file.png"},
+        )
+
+    result_text = _extract_text(result)
+    parsed = json.loads(result_text)
+    assert parsed["status"] == "error"
+    assert "不存在" in parsed["message"]
+
+
+@pytest.mark.asyncio
+async def test_client_write_asset_source_not_exist(mcp_server: FastMCP, wiki_root: Path):
+    async with Client(mcp_server) as client:
+        result = await client.call_tool(
+            "write_asset",
+            {
+                "source": "/nonexistent/file.png",
+                "path": "01-工作",
+                "filename": "file.png",
+                "type": "images",
+            },
+        )
+
+    result_text = _extract_text(result)
+    parsed = json.loads(result_text)
+    assert parsed["status"] == "error"

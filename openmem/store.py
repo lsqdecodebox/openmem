@@ -18,6 +18,8 @@ from openmem.utils import (
 
 logger = logging.getLogger(__name__)
 
+VALID_ASSET_TYPES = {"images", "files", "videos"}
+
 
 def _error_json(message: str) -> str:
     return json.dumps({"status": "error", "message": message}, ensure_ascii=False)
@@ -135,6 +137,97 @@ class WikiStore:
             logger.info(f"创建页面: {path}")
 
         return json.dumps({"status": "ok", "path": path}, ensure_ascii=False)
+
+    def write_asset(
+        self,
+        source: str,
+        path: str,
+        filename: str,
+        type: str = "files",
+        overwrite: bool = False,
+    ) -> str:
+        if type not in VALID_ASSET_TYPES:
+            return _error_json(f"不支持的文件类型: {type}，仅支持 {', '.join(sorted(VALID_ASSET_TYPES))}")
+
+        if not filename or len(filename.strip()) == 0:
+            return _error_json("filename 不能为空")
+
+        try:
+            src_path = Path(source).expanduser().resolve()
+            if not src_path.exists():
+                return _error_json(f"文件不存在: {source}")
+            if not src_path.is_file():
+                return _error_json(f"路径不是文件: {source}")
+            raw_bytes = src_path.read_bytes()
+        except OSError as e:
+            return _error_json(f"文件读取失败: {str(e)}")
+
+        safe_path = sanitize_path(path)
+        safe_filename = Path(filename).name
+
+        asset_dir = self.wiki_root / type / safe_path.lstrip("/")
+        asset_dir.mkdir(parents=True, exist_ok=True)
+
+        asset_path = asset_dir / safe_filename
+
+        if asset_path.exists() and not overwrite:
+            return json.dumps(
+                {
+                    "status": "file_exists",
+                    "message": f"文件已存在: {type}/{safe_path}/{safe_filename}，使用 overwrite=True 覆盖",
+                    "path": f"{type}/{safe_path}/{safe_filename}",
+                },
+                ensure_ascii=False,
+            )
+
+        asset_path.write_bytes(raw_bytes)
+
+        relative_path = f"{type}/{safe_path}/{safe_filename}"
+        logger.info(f"写入资产: {relative_path}, 大小: {len(raw_bytes)} 字节")
+
+        return json.dumps(
+            {
+                "status": "ok",
+                "path": relative_path,
+                "filename": safe_filename,
+                "type": type,
+                "size": len(raw_bytes),
+            },
+            ensure_ascii=False,
+        )
+
+    def read_asset(self, path: str) -> str:
+        if not path or len(path.strip()) == 0:
+            return _error_json("path 不能为空")
+
+        safe_path = sanitize_path(path)
+        asset_path = self.wiki_root / safe_path.lstrip("/")
+
+        try:
+            asset_path = asset_path.resolve()
+        except OSError:
+            return _error_json(f"无效路径: {path}")
+
+        if not str(asset_path).startswith(str(self.wiki_root)):
+            return _error_json(f"路径不在记忆目录下: {path}")
+
+        if not asset_path.exists():
+            return _error_json(f"文件不存在: {path}")
+
+        if not asset_path.is_file():
+            return _error_json(f"路径不是文件: {path}")
+
+        file_size = asset_path.stat().st_size
+
+        return json.dumps(
+            {
+                "status": "ok",
+                "absolute_path": str(asset_path),
+                "relative_path": safe_path,
+                "size": file_size,
+            },
+            ensure_ascii=False,
+        )
 
     def get_core_principles(self) -> str:
         parts = []
