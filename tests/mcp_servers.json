@@ -1,0 +1,8 @@
+{
+  "mcp": {
+    "lsq-mem": {
+      "type": "local",
+      "command": ["openmem"]
+    }
+  }
+}
