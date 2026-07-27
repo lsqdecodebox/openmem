@@ -2,7 +2,11 @@
   "mcp": {
     "lsq-mem": {
       "type": "local",
-      "command": ["openmem"]
+      "command": ["python", "-m", "openmem.main"]
+    },
+    "lsq-mem-remote": {
+      "type": "remote",
+      "url": "http://127.0.0.1:8000/mcp"
     }
   }
 }

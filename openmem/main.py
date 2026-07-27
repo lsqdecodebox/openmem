@@ -150,7 +150,19 @@ def core_principles_prompt() -> str:
 
 
 def main():
-    mcp.run()
+    transport_cfg = config.get("transport", {})
+    mode = transport_cfg.get("mode", "local")
+
+    if mode == "remote":
+        remote_cfg = config.get("remote", {})
+        mcp.run(
+            transport="streamable-http",
+            host=remote_cfg.get("host", "127.0.0.1"),
+            port=remote_cfg.get("port", 8000),
+            path=remote_cfg.get("path", "/mcp"),
+        )
+    else:
+        mcp.run()
 
 
 if __name__ == "__main__":

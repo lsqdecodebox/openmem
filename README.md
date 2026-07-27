@@ -18,11 +18,17 @@ pip install -e ".[dev]"
 
 ### 独立使用
 
+默认以 stdio 模式启动：
+
 ```bash
 openmem
 ```
 
-服务以 stdio 模式运行，等待 MCP 客户端连接。
+以 streamable-http 远程模式启动（需在 `openmem.json` 配置 `"transport": {"mode": "remote"}`）：
+
+```bash
+openmem
+# 服务将在 http://127.0.0.1:8000/mcp 启动
 
 ### 客户端std模式使用
 
@@ -41,12 +47,25 @@ openmem
 
 **OpenCode** — 在 `.opencode.json` 中配置：
 
+local 模式（推荐）：
 ```json
 {
   "mcp": {
     "openmem": {
       "type": "local",
-      "command": "openmem"
+      "command": ["openmem"]
+    }
+  }
+}
+```
+
+remote 模式（需 openmem 服务端也配为 remote 模式）：
+```json
+{
+  "mcp": {
+    "openmem": {
+      "type": "remote",
+      "url": "http://127.0.0.1:8000/mcp"
     }
   }
 }
@@ -89,6 +108,14 @@ openmem
     "retention_days": 7
   },
   "default_tags": [],
+  "transport": {
+    "mode": "local"
+  },
+  "remote": {
+    "host": "127.0.0.1",
+    "port": 8000,
+    "path": "/mcp"
+  },
   "logging": {
     "level": "INFO",
     "file_enabled": true,
@@ -108,6 +135,10 @@ openmem
 | `snapshot.cleanup_interval_minutes` | `10`     | 快照清理定时器间隔    |
 | `snapshot.retention_days`           | `7`      | 快照保留天数       |
 | `logging.file_enabled`              | `true`   | 是否启用日志文件输出   |
+| `transport.mode`                   | `"local"` | 传输模式：`"local"`(stdio) 或 `"remote"`(streamable-http) |
+| `remote.host`                      | `"127.0.0.1"` | remote 模式下绑定的主机地址 |
+| `remote.port`                      | `8000`   | remote 模式下的监听端口 |
+| `remote.path`                      | `"/mcp"` | remote 模式下的 HTTP 端点路径 |
 
 ## 存储结构
 

@@ -16,6 +16,14 @@ DEFAULT_CONFIG = {
         "schedule_enabled": True,
     },
     "default_tags": [],
+    "transport": {
+        "mode": "local",
+    },
+    "remote": {
+        "host": "127.0.0.1",
+        "port": 3683,
+        "path": "/mcp",
+    },
     "logging": {
         "level": "INFO",
         "file_enabled": True,
