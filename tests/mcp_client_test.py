@@ -14,12 +14,14 @@
       "type": "local",           // stdio 模式
       "command": ["openmem"],
       "env": {},                 // 可选
-      "cwd": "..."               // 可选
+      "cwd": "...",              // 可选，子进程工作目录
+      "enable": true             // 可选，是否执行测试，默认 true
     },
     "远程服务": {
       "type": "remote",          // streamable-http 模式
       "url": "http://127.0.0.1:8000/mcp",
-      "headers": {}              // 可选
+      "headers": {},             // 可选
+      "enable": true             // 可选，是否执行测试，默认 true
     }
   }
 }
@@ -352,10 +354,10 @@ async def _run_tests(adapter: SessionAdapter | ClientAdapter, r: dict):
 async def test_local_server(name: str, server_config: dict) -> dict:
     cmd_list = server_config.get("command")
     if not cmd_list or not isinstance(cmd_list, list) or len(cmd_list) == 0:
-        return {
-            "name": name, "status": "failed",
-            "errors": ["command 字段缺失或格式错误"],
-        }
+        r = _new_result(name)
+        r["status"] = "failed"
+        r["errors"].append("command 字段缺失或格式错误")
+        return r
 
     command = resolve_command(cmd_list[0])
     args = cmd_list[1:]
@@ -401,10 +403,10 @@ async def test_remote_server(name: str, server_config: dict) -> dict:
 
     url = server_config.get("url")
     if not url:
-        return {
-            "name": name, "status": "failed",
-            "errors": ["url 字段缺失"],
-        }
+        r = _new_result(name)
+        r["status"] = "failed"
+        r["errors"].append("url 字段缺失")
+        return r
 
     r = _new_result(name)
     try:
@@ -450,6 +452,13 @@ def _finalize_result(r: dict):
 
 
 async def test_server(name: str, server_config: dict) -> dict:
+    # 检查是否启用测试
+    if not server_config.get("enable", True):
+        r = _new_result(name)
+        r["status"] = "skipped"
+        r["errors"].append("enable=false, 已跳过")
+        return r
+
     server_type = server_config.get("type", "local")
 
     if server_type == "remote":
@@ -457,10 +466,10 @@ async def test_server(name: str, server_config: dict) -> dict:
     elif server_type == "local":
         return await test_local_server(name, server_config)
     else:
-        return {
-            "name": name, "status": "skipped",
-            "errors": [f"不支持的 type: {server_type}"],
-        }
+        r = _new_result(name)
+        r["status"] = "skipped"
+        r["errors"].append(f"不支持的 type: {server_type}")
+        return r
 
 
 def print_summary(results: list[dict]):

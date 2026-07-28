@@ -1,11 +1,32 @@
 {
   "mcp": {
+	"chrome-devtools": {
+      "type": "local",
+	  "enable":true,
+      "command": ["npx", "-y", "chrome-devtools-mcp@latest", "--proxy-server=http://127.0.0.1:51837"]
+    },
+	"bocha-search-mcp": {
+      "type": "local",
+	  "enable":true,
+      "command": [
+        "uv",
+        "--directory",
+        "/Users/shuquanlin/lingo_file/A_coding/bocha-search-mcp",
+        "run",
+        "bocha-search-mcp"
+      ],
+      "env": {
+        "BOCHA_API_KEY": "sk-5a03e82240e345c2a0ef6188eccdc666"
+      }
+    },
     "lsq-mem": {
       "type": "local",
-      "command": ["python", "-m", "openmem.main"]
+	  "enable":false,
+      "command": ["openmem"]
     },
     "lsq-mem-remote": {
       "type": "remote",
+	  "enable":false,
       "url": "http://127.0.0.1:8000/mcp"
     }
   }
