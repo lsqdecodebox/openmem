@@ -144,6 +144,21 @@ class SessionAdapter:
         return await self._session.read_resource(uri)
 
 
+class _CallToolResultWrapper:
+    """fastmcp.Client.call_tool 返回值的兼容包装，提供 isError/content 属性"""
+
+    def __init__(self, result):
+        self._result = result
+
+    @property
+    def isError(self):
+        return getattr(self._result, "is_error", False)
+
+    @property
+    def content(self):
+        return getattr(self._result, "content", None)
+
+
 class ClientAdapter:
     """fastmcp.Client 适配器 (remote/streamable-http)"""
 
@@ -174,7 +189,8 @@ class ClientAdapter:
         return await self._client.list_tools()
 
     async def call_tool(self, name: str, arguments: dict):
-        return await self._client.call_tool(name, arguments=arguments, raise_on_error=False)
+        raw = await self._client.call_tool(name, arguments=arguments, raise_on_error=False)
+        return _CallToolResultWrapper(raw)
 
     async def list_prompts(self) -> list:
         return await self._client.list_prompts()
@@ -188,6 +204,7 @@ class ClientAdapter:
     async def read_resource(self, uri):
         from mcp.types import ReadResourceResult
         contents = await self._client.read_resource(uri)
+        return ReadResourceResult(contents=contents)
         return ReadResourceResult(contents=contents)
 
 
