@@ -19,12 +19,17 @@
 1. **记忆体核心诉求**：
    
        对人与agent使用友好、记忆结构定制、记忆共享、权限隔离、记忆追溯、主动式记忆
+
 2. **没有通用最优解**：AI Agent记忆系统已分化为五大技术路线，分别对应不同场景需求。企业级生产优先考虑Pinecone Nexus和Mem0；个人开发者优先考虑GBrain和LLM Wiki、openviking；政府/国防等高合规场景唯一选择是Palantir AIP Memory。
+
 3. **范式转移已完成**：传统"查询时检索+拼接"的RAG范式已被淘汰。当前主流是"**写入时预处理+分层加载**"，Token效率提升10-30倍。未来方向是"本体驱动+决策闭环"，让记忆从"信息库"进化为"知识库"。
+
 4. **三大核心矛盾**：所有记忆系统都在解决三个根本矛盾：
+   
    - Token效率 vs 信息完整性  
    - 自动化程度 vs 可控制性  
    - 检索速度 vs 检索精度  
+
 5. **企业级与个人级彻底分化**：企业级系统追求安全、合规、可扩展；个人级系统追求数据主权、零成本、透明可编辑。两者技术路线差异越来越大，几乎没有交集。
 
 #### 目前CATL相关情况
@@ -89,12 +94,14 @@
   ### 2. GBrain
   
   **核心逻辑**：用Postgres数据库模拟人类大脑的记忆机制，通过"白天接收信息+夜间梦境整合"的模式，实现零LLM成本的知识图谱自动构建。
+  
+  **定义**：它不是单纯依赖临时上下文或单一 RAG 查询，而是以 [Markdown 仓库](https://zhida.zhihu.com/search?content_id=273077876&content_type=Article&match_order=1&q=Markdown+%E4%BB%93%E5%BA%93&zd_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ6aGlkYV9zZXJ2ZXIiLCJleHAiOjE3ODU0MDE0MzEsInEiOiJNYXJrZG93biDku5PlupMiLCJ6aGlkYV9zb3VyY2UiOiJlbnRpdHkiLCJjb250ZW50X2lkIjoyNzMwNzc4NzYsImNvbnRlbnRfdHlwZSI6IkFydGljbGUiLCJtYXRjaF9vcmRlciI6MSwiemRfdG9rZW4iOm51bGx9.01B8NCdK9aJNEmOW2ztTeIzGbpemSIY5YSHCvovufMk&zhida_source=entity)作为唯一真相源，结合 [Postgres](https://zhida.zhihu.com/search?content_id=273077876&content_type=Article&match_order=1&q=Postgres&zd_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ6aGlkYV9zZXJ2ZXIiLCJleHAiOjE3ODU0MDE0MzEsInEiOiJQb3N0Z3JlcyIsInpoaWRhX3NvdXJjZSI6ImVudGl0eSIsImNvbnRlbnRfaWQiOjI3MzA3Nzg3NiwiY29udGVudF90eXBlIjoiQXJ0aWNsZSIsIm1hdGNoX29yZGVyIjoxLCJ6ZF90b2tlbiI6bnVsbH0.d3g0Y88yLxC8js-JJr5kKl__4O4CdCBDL3bMDYTmWOM&zhida_source=entity) 和 pgvector 的混合检索引擎，构建了一个可持续读写、人机共管、自动整理的长期记忆系统。**简单说，更复杂完善的rag系统。**
 
 - **存储结构**：双引擎可插拔架构(PGLite WASM + Postgres+pgvector)。以Markdown文件作为唯一事实源，构建包含5种类型化关系的知识图谱。
 
-- **存储流程**：用户写入Markdown → 正则+模式匹配自动识别实体和关系 → 实时更新知识图谱 → 夜间"梦境循环"自动丰富实体、修复引用、合并重复记忆。**全程无LLM调用**。
+- **存储流程**：用户写入Markdown → 正则+模式匹配自动识别实体和关系 → 实时更新知识图谱 → 夜间"梦境循环"自动丰富实体、修复引用、合并重复记忆。
 
-- **检索流程**：用户查询 → 多查询扩展 → 向量HNSW搜索 + 关键词tsvector搜索 → RRF结果融合 → 4层去重 → ZE zerank-2重排序 → 知识图谱关联补充。
+- **检索流程**：用户查询 → 多查询扩展 → 向量HNSW搜索 + 关键词tsvector搜索 → RRF结果融合 → 4层去重 → ZE zerank-2重排序 → 知识图谱关联补充。**本质还是rag检索，无LLM调用**
 
 - **生态**：MCP Server支持37+工具，与OpenClaw/Hermes Agent原生集成。
 
