@@ -1,5 +1,6 @@
 import json
 import logging
+import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -32,15 +33,22 @@ def setup_logging(config: dict):
 
     if log_cfg.get("file_enabled", False):
         log_path = Path(log_cfg.get("file_path", "./logs/openmem.log")).expanduser()
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = RotatingFileHandler(
-            log_path,
-            maxBytes=log_cfg.get("max_file_size_mb", 10) * 1024 * 1024,
-            backupCount=log_cfg.get("backup_count", 5),
-            encoding="utf-8",
-        )
-        file_handler.setFormatter(logging.Formatter(fmt))
-        handlers.append(file_handler)
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            file_handler = RotatingFileHandler(
+                log_path,
+                maxBytes=log_cfg.get("max_file_size_mb", 10) * 1024 * 1024,
+                backupCount=log_cfg.get("backup_count", 5),
+                encoding="utf-8",
+            )
+            file_handler.setFormatter(logging.Formatter(fmt))
+            handlers.append(file_handler)
+        except (PermissionError, OSError) as e:
+            print(
+                f"[openmem] 警告：无法创建日志目录 {log_path.parent}（{e}），"
+                "将仅使用控制台日志输出",
+                file=sys.stderr,
+            )
 
     logging.basicConfig(level=level, format=fmt, handlers=handlers)
 

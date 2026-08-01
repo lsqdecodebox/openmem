@@ -1,5 +1,6 @@
 import json
 import logging
+import sys
 from pathlib import Path
 
 import frontmatter
@@ -119,16 +120,31 @@ def ensure_config(config_path: Path) -> Path:
         logger.info("配置文件已存在")
         return config_path
 
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(DEFAULT_CONFIG, f, indent=4, ensure_ascii=False)
-    logger.info("已创建默认配置文件")
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(DEFAULT_CONFIG, f, indent=4, ensure_ascii=False)
+        logger.info("已创建默认配置文件")
+    except (PermissionError, OSError) as e:
+        print(
+            f"[openmem] 警告：无法创建配置文件 {config_path}（{e}），"
+            "将使用内置默认配置",
+            file=sys.stderr,
+        )
     return config_path
 
 
 def ensure_wiki_root(wiki_root: Path):
-    wiki_root.mkdir(parents=True, exist_ok=True)
-    logger.info("Wiki根目录已就绪")
+    try:
+        wiki_root.mkdir(parents=True, exist_ok=True)
+        logger.info("Wiki根目录已就绪")
+    except (PermissionError, OSError) as e:
+        print(
+            f"[openmem] 错误：无法创建Wiki根目录 {wiki_root}（{e}）。\n"
+            "请检查目录权限，或在配置文件中修改 wiki_root 路径指向可写位置。",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 def ensure_core_prompts(wiki_root: Path):
