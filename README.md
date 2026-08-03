@@ -18,17 +18,26 @@ pip install -e ".[dev]"
 
 ### 独立使用
 
-默认以 stdio 模式启动：
+默认以 stdio 本地模式启动：
 
 ```bash
 openmem
 ```
 
-以 streamable-http 远程模式启动（需在 `openmem.json` 配置 `"transport": {"mode": "remote"}`）：
+以 streamable-http 远程模式启动：
 
 ```bash
-openmem
-# 服务将在 http://127.0.0.1:8000/mcp 启动
+openmem --remote
+# 服务将在 http://127.0.0.1:6000/mcp 启动
+```
+
+远程模式参数可通过命令行覆盖（优先级高于配置文件）：
+
+```bash
+openmem --remote --host 0.0.0.0 --port 9000 --path /api
+```
+
+参数优先级：**命令行 > 配置文件 > 默认值**
 
 ### 客户端std模式使用
 
@@ -59,13 +68,13 @@ local 模式（推荐）：
 }
 ```
 
-remote 模式（需 openmem 服务端也配为 remote 模式）：
+remote 模式（需 openmem 服务端以 `openmem --remote` 启动）：
 ```json
 {
   "mcp": {
     "openmem": {
       "type": "remote",
-      "url": "http://127.0.0.1:8000/mcp"
+      "url": "http://127.0.0.1:6000/mcp"
     }
   }
 }
@@ -108,12 +117,9 @@ remote 模式（需 openmem 服务端也配为 remote 模式）：
     "retention_days": 7
   },
   "default_tags": [],
-  "transport": {
-    "mode": "local"
-  },
   "remote": {
     "host": "127.0.0.1",
-    "port": 8000,
+    "port": 6000,
     "path": "/mcp"
   },
   "logging": {
@@ -135,10 +141,11 @@ remote 模式（需 openmem 服务端也配为 remote 模式）：
 | `snapshot.cleanup_interval_minutes` | `10`     | 快照清理定时器间隔    |
 | `snapshot.retention_days`           | `7`      | 快照保留天数       |
 | `logging.file_enabled`              | `true`   | 是否启用日志文件输出   |
-| `transport.mode`                   | `"local"` | 传输模式：`"local"`(stdio) 或 `"remote"`(streamable-http) |
-| `remote.host`                      | `"127.0.0.1"` | remote 模式下绑定的主机地址 |
-| `remote.port`                      | `8000`   | remote 模式下的监听端口 |
-| `remote.path`                      | `"/mcp"` | remote 模式下的 HTTP 端点路径 |
+| `remote.host`                      | `"127.0.0.1"` | remote 模式下绑定的主机地址（可被 `--host` 覆盖） |
+| `remote.port`                      | `6000`   | remote 模式下的监听端口（可被 `--port` 覆盖） |
+| `remote.path`                      | `"/mcp"` | remote 模式下的 HTTP 端点路径（可被 `--path` 覆盖） |
+
+> 启动模式通过命令行 `--remote` 开关控制，不再使用配置文件。旧版配置中的 `transport` 字段已废弃，保留不报错但不生效。
 
 ## 存储结构
 

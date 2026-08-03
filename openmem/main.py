@@ -44,6 +44,9 @@ def setup_logging(config: dict):
 
     logging.basicConfig(level=level, format=fmt, handlers=handlers)
 
+    for _noisy in ("mcp.server.lowlevel.server", "mcp.server.streamable_http_manager"):
+        logging.getLogger(_noisy).setLevel(logging.WARNING)
+
 
 config = load_config()
 setup_logging(config)
@@ -150,16 +153,27 @@ def core_principles_prompt() -> str:
 
 
 def main():
-    transport_cfg = config.get("transport", {})
-    mode = transport_cfg.get("mode", "local")
+    import argparse
 
-    if mode == "remote":
+    parser = argparse.ArgumentParser(prog="openmem", description="Personal Wiki Memory MCP Server")
+    parser.add_argument("--remote", action="store_true", help="以 streamable-http 远程模式启动（默认 stdio 本地模式）")
+    parser.add_argument("--host", help="远程模式绑定主机地址（覆盖 config.remote.host）")
+    parser.add_argument("--port", type=int, help="远程模式监听端口（覆盖 config.remote.port）")
+    parser.add_argument("--path", help="远程模式 HTTP 端点路径（覆盖 config.remote.path）")
+    args = parser.parse_args()
+
+    if args.remote:
         remote_cfg = config.get("remote", {})
         mcp.run(
             transport="streamable-http",
-            host=remote_cfg.get("host", "127.0.0.1"),
-            port=remote_cfg.get("port", 8000),
-            path=remote_cfg.get("path", "/mcp"),
+            host=args.host or remote_cfg.get("host", "127.0.0.1"),
+            port=args.port or remote_cfg.get("port", 6000),
+            path=args.path or remote_cfg.get("path", "/mcp"),
+            log_level="warning",
+            uvicorn_config={
+                "access_log": False,
+                "use_colors": False,
+            },
         )
     else:
         mcp.run()
