@@ -64,6 +64,7 @@ store = WikiStore(
     wiki_root=wiki_root,
     max_depth=config.get("max_depth", 7),
     snapshot_cfg=config.get("snapshot"),
+    max_chars=config.get("max_chars", 500000),
 )
 
 

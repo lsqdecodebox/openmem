@@ -14,6 +14,8 @@ from openmem.utils import (
     compute_level,
     count_content_chars,
     _strip_markdown,
+    is_directory_summary,
+    build_compressed_filenames,
 )
 
 logger = logging.getLogger(__name__)
@@ -39,9 +41,11 @@ class WikiStore:
         wiki_root: Path,
         max_depth: int = 7,
         snapshot_cfg: dict | None = None,
+        max_chars: int = 500000,
     ):
         self.wiki_root = wiki_root.resolve()
         self.max_depth = max_depth
+        self.max_chars = max_chars
 
         if snapshot_cfg:
             self.snapshot_enabled = snapshot_cfg.get("enabled", True)
@@ -69,6 +73,7 @@ class WikiStore:
             return _error_json(f"路径不是目录: {path}")
 
         result = self._build_directory_tree(target_dir)
+        result = self._compress_tree(result)
         return json.dumps(result, ensure_ascii=False, indent=2)
 
     def read_memory(self, path: str) -> str:
@@ -120,8 +125,33 @@ class WikiStore:
                 f"路径深度超过{self.max_depth}层限制"
             )
 
+        is_summary = path.rstrip("/").endswith("/summary")
         file_path = self._resolve_page_path(path)
         final_summary = summary if summary is not None else self._generate_summary(content)
+
+        if is_summary:
+            content = ""
+            final_summary = summary if summary is not None else ""
+            level = compute_level(path)
+
+            if file_path.exists():
+                self._create_snapshot(file_path)
+
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            post = frontmatter.Post("")
+            post.metadata = {
+                "title": "summary",
+                "type": "directory_summary",
+                "level": level,
+                "summary": final_summary,
+                "tags": tags or [],
+            }
+
+            with open(file_path, "w", encoding="utf-8") as f:
+                frontmatter.dump(post, f)
+
+            logger.info(f"写入目录摘要: {path}")
+            return json.dumps({"status": "ok", "path": path}, ensure_ascii=False)
 
         if file_path.exists():
             self._create_snapshot(file_path)
@@ -294,22 +324,36 @@ class WikiStore:
                 continue
 
             if entry.is_dir():
+                sub = self._build_directory_tree(entry)
                 child = {
                     "name": entry.name,
                     "type": "directory",
                     "level": compute_level(self._relative_path(entry)),
-                    "children": self._build_directory_tree(entry)["children"],
+                    "children": sub["children"],
                 }
+                if "summary" in sub:
+                    child["summary"] = sub["summary"]
+                if "tags" in sub:
+                    child["tags"] = sub["tags"]
                 result["children"].append(child)
 
             elif entry.is_file() and entry.suffix == ".md":
+                if is_directory_summary(entry):
+                    try:
+                        fm = parse_frontmatter(entry)
+                        result["summary"] = fm.metadata.get("summary", "")
+                        result["tags"] = fm.metadata.get("tags", [])
+                    except Exception:
+                        result["summary"] = ""
+                        result["tags"] = []
+                    continue
+
                 try:
                     fm = parse_frontmatter(entry)
                     child = {
                         "name": entry.name,
                         "type": fm.metadata.get("type", "page"),
                         "level": fm.metadata.get("level", 1),
-                        "title": fm.metadata.get("title", entry.stem),
                         "summary": fm.metadata.get("summary", ""),
                     }
                 except Exception:
@@ -317,12 +361,64 @@ class WikiStore:
                         "name": entry.name,
                         "type": "page",
                         "level": 1,
-                        "title": entry.stem,
                         "summary": "",
                     }
                 result["children"].append(child)
 
         return result
+
+    def _compress_tree(self, tree: dict) -> dict:
+        chars = len(json.dumps(tree, ensure_ascii=False))
+        if chars <= self.max_chars:
+            return tree
+
+        while chars > self.max_chars:
+            target = self._find_deepest_compressible(tree)
+            if target is None:
+                break
+
+            file_nodes = [c for c in target["children"] if c["type"] != "directory" and not c["name"].startswith("_compressed")]
+            if len(file_nodes) < 2:
+                target.setdefault("_compressed_disabled", True)
+                continue
+
+            filenames = [f["name"] for f in file_nodes]
+            count, names_str = build_compressed_filenames(filenames)
+            target["_compressed_filecount"] = count
+            target["_compressed_filenames"] = names_str
+            target["children"] = [c for c in target["children"] if c["type"] == "directory"]
+
+            chars = len(json.dumps(tree, ensure_ascii=False))
+
+        return tree
+
+    def _find_deepest_compressible(self, node: dict) -> dict | None:
+        """后序 DFS，返回最深的、含 ≥2 个非 directory 文件节点且未压缩过的目录节点"""
+        best = None
+        best_depth = -1
+
+        def dfs(n: dict, depth: int):
+            nonlocal best, best_depth
+            if n.get("type") != "directory":
+                return
+            if n.get("_compressed_disabled"):
+                return
+
+            file_count = sum(
+                1 for c in n.get("children", [])
+                if c.get("type") != "directory" and not c.get("name", "").startswith("_compressed")
+            )
+
+            if file_count >= 2 and depth > best_depth:
+                best = n
+                best_depth = depth
+
+            for c in reversed(n.get("children", [])):
+                if c.get("type") == "directory":
+                    dfs(c, depth + 1)
+
+        dfs(node, 0)
+        return best
 
     def _create_snapshot(self, file_path: Path):
         if not self.snapshot_enabled:

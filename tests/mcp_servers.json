@@ -1,4 +1,5 @@
 {
+  "max_chars": 100000,
   "mcp": {
     "chrome-devtools": {
       "type": "local",

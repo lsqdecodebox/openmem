@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONFIG = {
     "wiki_root": "~/.config/openmem/wiki",
     "max_depth": 7,
+    "max_chars": 100000,
     "snapshot": {
         "enabled": True,
         "cleanup_interval_minutes": 10,

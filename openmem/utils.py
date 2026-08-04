@@ -7,6 +7,8 @@ import frontmatter
 
 logger = logging.getLogger(__name__)
 
+SUMMARY_FILENAME = "summary.md"
+
 
 @dataclass
 class PathValidation:
@@ -113,3 +115,19 @@ def is_core_page(file_path: Path, wiki_root: Path) -> bool:
     if file_path.suffix != ".md":
         return False
     return file_path.parent == wiki_root
+
+
+def is_directory_summary(entry: Path) -> bool:
+    """判断文件是否为目录的 summary.md"""
+    return entry.is_file() and entry.name == SUMMARY_FILENAME
+
+
+def build_compressed_filenames(filenames: list[str]) -> tuple[int, str]:
+    """
+    输入被压缩的文件名列表，返回 (count, filenames_str)
+    filenames_str 为文件名按序拼接、整体截断 50 字
+    """
+    names = "；".join(filenames)
+    if len(names) > 50:
+        names = names[:50]
+    return len(filenames), names

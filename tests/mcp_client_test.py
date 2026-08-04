@@ -258,6 +258,7 @@ async def _run_tests(adapter: SessionAdapter | ClientAdapter, r: dict):
                 # print(json.dumps(parsed_data, indent=4, ensure_ascii=False))
                 print(f"\n        -> {t.name}: {status}  ")
                 print(preview)
+                print("字符串长度：",len(preview))
                 
             except Exception as e:
                 r["errors"].append(f"call_tool {t.name} 异常: {e}")

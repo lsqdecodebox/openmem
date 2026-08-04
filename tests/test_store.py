@@ -222,6 +222,163 @@ class TestWikiStore:
             assert not (self.wiki_root / t).exists()
 
 
+class TestDirectorySummaryAndCompression:
+    def setup_method(self):
+        import tempfile
+
+        self.wiki_root = Path(tempfile.mkdtemp())
+        self.store = WikiStore(
+            self.wiki_root, max_depth=7, snapshot_cfg={"enabled": False}
+        )
+
+    def test_get_directory_no_title_field(self):
+        _create_md(
+            self.wiki_root / "00-个人" / "学习.md",
+            "# 学习",
+            {"title": "学习", "type": "page", "level": 2, "summary": "学习记录", "tags": []},
+        )
+        result = json.loads(self.store.get_directory("/00-个人"))
+        for c in result["children"]:
+            assert "title" not in c
+
+    def test_summary_md_promoted_to_dir_meta(self):
+        _create_md(
+            self.wiki_root / "00-个人" / "summary.md",
+            "",
+            {
+                "title": "summary",
+                "type": "directory_summary",
+                "level": 1,
+                "summary": "个人信息总览",
+                "tags": ["个人"],
+            },
+        )
+        _create_md(
+            self.wiki_root / "00-个人" / "健康.md",
+            "# 健康",
+            {"title": "健康", "type": "page", "level": 2, "summary": "健康", "tags": []},
+        )
+        result = json.loads(self.store.get_directory("/"))
+        dir_node = next(c for c in result["children"] if c["name"] == "00-个人")
+        assert dir_node["summary"] == "个人信息总览"
+        assert dir_node["tags"] == ["个人"]
+        names = [c["name"] for c in dir_node["children"]]
+        assert "summary.md" not in names
+        assert "健康.md" in names
+
+    def test_write_memory_summary_path(self):
+        result = self.store.write_memory(
+            content="应被忽略的正文",
+            path="/00-个人/summary",
+            summary="个人信息总览",
+            tags=["个人"],
+        )
+        assert json.loads(result)["status"] == "ok"
+
+        file_path = self.wiki_root / "00-个人" / "summary.md"
+        assert file_path.exists()
+        post = parse_frontmatter(file_path)
+        assert post.metadata["type"] == "directory_summary"
+        assert post.metadata["summary"] == "个人信息总览"
+        assert post.content.strip() == ""
+
+    def test_read_memory_can_read_summary(self):
+        _create_md(
+            self.wiki_root / "00-个人" / "summary.md",
+            "",
+            {
+                "title": "summary",
+                "type": "directory_summary",
+                "level": 1,
+                "summary": "个人信息总览",
+                "tags": ["个人"],
+            },
+        )
+        content = self.store.read_memory("/00-个人/summary")
+        assert "个人信息总览" in content
+        assert "directory_summary" in content
+
+    def test_compression_triggered_when_over_limit(self):
+        for i in range(5):
+            _create_md(
+                self.wiki_root / "00-个人" / f"文件{i}.md",
+                f"# 文件{i}",
+                {"title": f"文件{i}", "type": "page", "level": 2, "summary": f"摘要{i}", "tags": []},
+            )
+        store = WikiStore(
+            self.wiki_root, max_depth=7, snapshot_cfg={"enabled": False}, max_chars=200
+        )
+        result = json.loads(store.get_directory("/00-个人"))
+        assert "_compressed_filecount" in result
+        assert result["_compressed_filecount"] == 5
+        assert "_compressed_filenames" in result
+        assert len(result["children"]) == 0 or all(
+            c["type"] == "directory" for c in result["children"]
+        )
+
+    def test_compression_excludes_summary_md(self):
+        _create_md(
+            self.wiki_root / "00-个人" / "summary.md",
+            "",
+            {
+                "title": "summary",
+                "type": "directory_summary",
+                "level": 1,
+                "summary": "总览",
+                "tags": [],
+            },
+        )
+        for i in range(5):
+            _create_md(
+                self.wiki_root / "00-个人" / f"文件{i}.md",
+                f"# 文件{i}",
+                {"title": f"文件{i}", "type": "page", "level": 2, "summary": f"摘要{i}", "tags": []},
+            )
+        store = WikiStore(
+            self.wiki_root, max_depth=7, snapshot_cfg={"enabled": False}, max_chars=200
+        )
+        result = json.loads(store.get_directory("/"))
+        dir_node = next(c for c in result["children"] if c["name"] == "00-个人")
+        assert dir_node["summary"] == "总览"
+        assert dir_node["_compressed_filecount"] == 5
+        assert "summary.md" not in dir_node["_compressed_filenames"]
+
+    def test_compression_bottom_up(self):
+        for i in range(3):
+            _create_md(
+                self.wiki_root / "00-个人" / "学习" / f"文件{i}.md",
+                f"# 文件{i}",
+                {"title": f"文件{i}", "type": "page", "level": 3, "summary": f"摘要{i}", "tags": []},
+            )
+            _create_md(
+                self.wiki_root / "01-工作" / f"文件{i}.md",
+                f"# 工作{i}",
+                {"title": f"工作{i}", "type": "page", "level": 2, "summary": f"工作摘要{i}", "tags": []},
+            )
+        store = WikiStore(
+            self.wiki_root, max_depth=7, snapshot_cfg={"enabled": False}, max_chars=300
+        )
+        result = json.loads(store.get_directory("/"))
+
+        deep_dir = next(c for c in result["children"] if c["name"] == "00-个人")
+        deep_sub = next(c for c in deep_dir["children"] if c["name"] == "学习")
+        assert "_compressed_filecount" in deep_sub
+        assert deep_sub["_compressed_filecount"] == 3
+
+    def test_compressed_filenames_truncated_50(self):
+        for i in range(20):
+            _create_md(
+                self.wiki_root / "00-个人" / f"超长文件名编号{i}.md",
+                f"# 文件{i}",
+                {"title": f"文件{i}", "type": "page", "level": 2, "summary": f"摘要{i}", "tags": []},
+            )
+        store = WikiStore(
+            self.wiki_root, max_depth=7, snapshot_cfg={"enabled": False}, max_chars=100
+        )
+        result = json.loads(store.get_directory("/00-个人"))
+        assert len(result["_compressed_filenames"]) <= 50
+
+
 class TestWriteAsset:
     def setup_method(self):
         import tempfile

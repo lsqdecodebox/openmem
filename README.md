@@ -99,9 +99,9 @@ remote 模式（需 openmem 服务端以 `openmem --remote` 启动）：
 
 | 工具              | 参数                                      | 说明                                                               |
 | --------------- | --------------------------------------- | ---------------------------------------------------------------- |
-| `get_directory` | `path`（默认 `/`）                          | 获取目录结构树，含每个条目的 title/summary/type/level；不返回 `images/files/videos` 资产目录 |
-| `read_memory`   | `path`                                  | 读取页面完整内容（含 Front Matter）；路径首段为 `images/files/videos` 时报错           |
-| `write_memory`  | `content`, `path?`, `tags?`, `summary?` | 覆盖写入记忆；path 为空时返回 `need_path` 提示；路径首段为 `images/files/videos` 时报错；更新前自动快照；缺目录自动创建；summary 为空时自动生成 |
+| `get_directory` | `path`（默认 `/`）                          | 获取目录结构树，含每个条目的 summary/type/level；不返回 `images/files/videos` 资产目录；目录下若有 `summary.md` 则上提为目录节点的 summary/tags；返回 JSON 字符数超 `max_chars` 时自底向上压缩最底层目录的非 summary 文件，压缩后目录节点新增 `_compressed_filecount` 与 `_compressed_filenames`（截断 50 字） |
+| `read_memory`   | `path`                                  | 读取页面完整内容（含 Front Matter）；路径首段为 `images/files/videos` 时报错；可读取 `summary.md` |
+| `write_memory`  | `content`, `path?`, `tags?`, `summary?` | 覆盖写入记忆；path 为空时返回 `need_path` 提示；路径首段为 `images/files/videos` 时报错；更新前自动快照；缺目录自动创建；summary 为空时自动生成；路径以 `/summary` 结尾时强制 `type=directory_summary` 且正文清空（用于生成目录元数据） |
 | `write_asset`   | `source`, `path`, `filename`, `type?`, `overwrite?` | 写入二进制资产到 `images/files/videos` 目录；`type` 默认 `files`               |
 | `read_asset`    | `path`                                  | 读取资产元信息（绝对路径、相对路径、文件大小）                                          |
 
@@ -113,6 +113,7 @@ remote 模式（需 openmem 服务端以 `openmem --remote` 启动）：
 {
   "wiki_root": "./wiki",
   "max_depth": 7,
+  "max_chars": 500000,
   "snapshot": {
     "enabled": true,
     "cleanup_interval_minutes": 10,
@@ -139,6 +140,7 @@ remote 模式（需 openmem 服务端以 `openmem --remote` 启动）：
 | ----------------------------------- | -------- | ------------ |
 | `wiki_root`                         | `./wiki` | Wiki 文件存储根目录 |
 | `max_depth`                         | `7`      | 目录最大层级深度     |
+| `max_chars`                         | `500000` | `get_directory` 返回 JSON 字符数上限，超限后自底向上压缩最底层目录的非 summary 文件 |
 | `snapshot.enabled`                  | `true`   | 是否启用写入前快照    |
 | `snapshot.cleanup_interval_minutes` | `10`     | 快照清理定时器间隔    |
 | `snapshot.retention_days`           | `7`      | 快照保留天数       |
