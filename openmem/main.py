@@ -52,9 +52,6 @@ def setup_logging(config: dict):
 
     logging.basicConfig(level=level, format=fmt, handlers=handlers)
 
-    for _noisy in ("mcp.server.lowlevel.server", "mcp.server.streamable_http_manager"):
-        logging.getLogger(_noisy).setLevel(logging.WARNING)
-
 
 config = load_config()
 setup_logging(config)
