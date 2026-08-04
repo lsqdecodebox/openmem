@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import frontmatter
@@ -168,24 +168,27 @@ class TestWikiStore:
         )
         store_with_snapshot.write_memory(content="v2", path="/测试")
 
-        snapshot_dir = self.wiki_root / ".snapshots" / "测试"
-        assert snapshot_dir.exists()
-        snapshots = list(snapshot_dir.glob("*.md"))
+        history_dir = self.wiki_root / ".snapshots" / "history" / "测试"
+        assert history_dir.exists()
+        snapshots = list(history_dir.glob("*.md"))
         assert len(snapshots) == 1
         assert "v1" in snapshots[0].read_text(encoding="utf-8")
 
-    def test_snapshot_cleanup(self):
-        snapshot_dir = self.wiki_root / ".snapshots" / "测试"
-        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        baseline = self.wiki_root / ".snapshots" / ".current" / "测试.md"
+        assert baseline.exists()
+        assert "v2" in baseline.read_text(encoding="utf-8")
 
-        old_time = datetime.now() - timedelta(days=30)
-        old_snapshot = snapshot_dir / "2020-01-01T00-00-00.md"
+    def test_snapshot_cleanup(self):
+        history_dir = self.wiki_root / ".snapshots" / "history" / "测试"
+        history_dir.mkdir(parents=True, exist_ok=True)
+
+        old_snapshot = history_dir / "2020-01-01T00-00-00.md"
         old_snapshot.write_text("old", encoding="utf-8")
 
-        import os
-
-        mod_time = old_time.timestamp()
-        os.utime(old_snapshot, (mod_time, mod_time))
+        current_dir = self.wiki_root / ".snapshots" / ".current"
+        current_dir.mkdir(parents=True, exist_ok=True)
+        baseline = current_dir / "测试.md"
+        baseline.write_text("current", encoding="utf-8")
 
         store_with_cleanup = WikiStore(
             self.wiki_root,
@@ -195,6 +198,64 @@ class TestWikiStore:
         store_with_cleanup._cleanup_snapshots()
 
         assert not old_snapshot.exists()
+        assert baseline.exists()
+
+    def test_cleanup_uses_filename_timestamp(self):
+        history_dir = self.wiki_root / ".snapshots" / "history" / "测试"
+        history_dir.mkdir(parents=True, exist_ok=True)
+
+        today_ts = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+        recent_snapshot = history_dir / f"{today_ts}.md"
+        recent_snapshot.write_text("recent", encoding="utf-8")
+
+        import os
+
+        old_time = datetime(2020, 1, 1).timestamp()
+        os.utime(recent_snapshot, (old_time, old_time))
+
+        store_with_cleanup = WikiStore(
+            self.wiki_root,
+            max_depth=7,
+            snapshot_cfg={"enabled": False, "retention_days": 7},
+        )
+        store_with_cleanup._cleanup_snapshots()
+
+        assert recent_snapshot.exists()
+
+    def test_scheduled_baseline_update(self):
+        _create_md(
+            self.wiki_root / "测试.md",
+            "v1",
+            {"title": "测试", "type": "page", "level": 1, "summary": "v1", "tags": []},
+        )
+
+        store = WikiStore(
+            self.wiki_root, max_depth=7, snapshot_cfg={"enabled": False}
+        )
+        store._update_baseline(self.wiki_root / "测试.md")
+
+        import os
+        import time
+
+        new_mtime = time.time() + 10
+        os.utime(self.wiki_root / "测试.md", (new_mtime, new_mtime))
+
+        _create_md(
+            self.wiki_root / "测试.md",
+            "v2",
+            {"title": "测试", "type": "page", "level": 1, "summary": "v2", "tags": []},
+        )
+        os.utime(self.wiki_root / "测试.md", (new_mtime, new_mtime))
+
+        store._scheduled_snapshot()
+
+        baseline = self.wiki_root / ".snapshots" / ".current" / "测试.md"
+        assert "v2" in baseline.read_text(encoding="utf-8")
+
+        history_dir = self.wiki_root / ".snapshots" / "history" / "测试"
+        snapshots = list(history_dir.glob("*.md"))
+        assert len(snapshots) == 1
+        assert "v1" in snapshots[0].read_text(encoding="utf-8")
 
     def test_get_directory_excludes_asset_dirs(self):
         for t in ("images", "files", "videos"):

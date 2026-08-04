@@ -135,7 +135,7 @@ class WikiStore:
             level = compute_level(path)
 
             if file_path.exists():
-                self._create_snapshot(file_path)
+                self._save_to_history(file_path)
 
             file_path.parent.mkdir(parents=True, exist_ok=True)
             post = frontmatter.Post("")
@@ -150,11 +150,12 @@ class WikiStore:
             with open(file_path, "w", encoding="utf-8") as f:
                 frontmatter.dump(post, f)
 
+            self._update_baseline(file_path)
             logger.info(f"写入目录摘要: {path}")
             return json.dumps({"status": "ok", "path": path}, ensure_ascii=False)
 
         if file_path.exists():
-            self._create_snapshot(file_path)
+            self._save_to_history(file_path)
 
             existing = parse_frontmatter(file_path)
             existing.metadata["tags"] = tags if tags is not None else existing.metadata.get("tags", [])
@@ -164,6 +165,7 @@ class WikiStore:
             with open(file_path, "w", encoding="utf-8") as f:
                 frontmatter.dump(existing, f)
 
+            self._update_baseline(file_path)
             logger.info(f"更新页面: {path}, 模式: overwrite")
         else:
             file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -184,6 +186,7 @@ class WikiStore:
             with open(file_path, "w", encoding="utf-8") as f:
                 frontmatter.dump(post, f)
 
+            self._update_baseline(file_path)
             logger.info(f"创建页面: {path}")
 
         return json.dumps({"status": "ok", "path": path}, ensure_ascii=False)
@@ -420,24 +423,45 @@ class WikiStore:
         dfs(node, 0)
         return best
 
-    def _create_snapshot(self, file_path: Path):
-        if not self.snapshot_enabled:
-            return
+    def _save_to_history(self, file_path: Path, logical_rel_path: Path | None = None):
+        """把 file_path 当前内容存入 history，时间戳=存档动作发生的当下。
 
+        用于 write_memory 覆盖旧版本前、定时任务基线更新前保存被取代的版本。
+
+        logical_rel_path 用于组织 history 子目录结构：默认按 file_path 自身的相对路径，
+        当 file_path 是基线文件（位于 .snapshots/.current/ 下）时，调用方应传入
+        对应源文件的 rel_path，使历史快照按源路径归档。
+        """
+        if logical_rel_path is None:
+            try:
+                logical_rel_path = file_path.relative_to(self.wiki_root)
+            except ValueError:
+                return
+
+        timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+        dst = self.wiki_root / ".snapshots" / "history" / logical_rel_path.with_suffix("") / f"{timestamp}.md"
+
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(file_path, dst)
+
+        logger.debug(f"存入历史: {dst}")
+
+    def _update_baseline(self, file_path: Path):
+        """把 file_path 当前内容覆盖写入 .current 基线（镜像源路径）。
+
+        基线始终反映源文件的当前状态，豁免清理。
+        """
         try:
             rel_path = file_path.relative_to(self.wiki_root)
         except ValueError:
             return
 
-        timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+        dst = self.wiki_root / ".snapshots" / ".current" / rel_path
 
-        snapshot_dir = self.wiki_root / ".snapshots" / rel_path.with_suffix("")
-        snapshot_path = snapshot_dir / f"{timestamp}.md"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(file_path, dst)
 
-        snapshot_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(file_path, snapshot_path)
-
-        logger.debug(f"创建快照: {snapshot_path}")
+        logger.debug(f"更新基线: {dst}")
 
     def _start_timer(self):
         def tick():
@@ -458,7 +482,10 @@ class WikiStore:
         logger.info(f"快照定时器已启动，间隔: {self.cleanup_interval}分钟")
 
     def _scheduled_snapshot(self):
-        snapshot_count = 0
+        scanned = 0
+        baseline_updated = 0
+        history_added = 0
+
         for md_file in self.wiki_root.rglob("*.md"):
             try:
                 rel = md_file.relative_to(self.wiki_root)
@@ -468,60 +495,51 @@ class WikiStore:
             if str(rel).startswith(".snapshots") or rel.name.startswith("."):
                 continue
 
-            latest = self._get_latest_snapshot_time(md_file)
-            file_mtime = datetime.fromtimestamp(md_file.stat().st_mtime)
+            scanned += 1
 
-            if latest is None or file_mtime > latest:
-                self._create_snapshot(md_file)
-                snapshot_count += 1
-                logger.info(f"定时快照: {rel}")
+            baseline = self.wiki_root / ".snapshots" / ".current" / rel
+            src_mtime = datetime.fromtimestamp(md_file.stat().st_mtime)
 
-        if snapshot_count > 0:
-            logger.info(f"定时快照完成，共创建{snapshot_count}个快照")
+            if not baseline.exists():
+                self._update_baseline(md_file)
+                baseline_updated += 1
+                logger.debug(f"建立基线: {rel}")
+            else:
+                base_mtime = datetime.fromtimestamp(baseline.stat().st_mtime)
+                if src_mtime > base_mtime:
+                    self._save_to_history(baseline, rel)
+                    self._update_baseline(md_file)
+                    baseline_updated += 1
+                    history_added += 1
+                    logger.debug(f"基线更新: {rel}")
 
-    def _get_latest_snapshot_time(self, file_path: Path) -> datetime | None:
-        try:
-            rel_path = file_path.relative_to(self.wiki_root)
-        except ValueError:
-            return None
-
-        snapshot_dir = self.wiki_root / ".snapshots" / rel_path.with_suffix("")
-        if not snapshot_dir.exists():
-            return None
-
-        latest_mtime = None
-        for snap_file in snapshot_dir.glob("*.md"):
-            try:
-                mtime = datetime.fromtimestamp(snap_file.stat().st_mtime)
-                if latest_mtime is None or mtime > latest_mtime:
-                    latest_mtime = mtime
-            except OSError:
-                continue
-
-        return latest_mtime
+        logger.info(
+            f"定时快照完成：扫描{scanned}个，更新基线{baseline_updated}个，新增历史{history_added}个"
+        )
 
     def _cleanup_snapshots(self):
-        snapshots_dir = self.wiki_root / ".snapshots"
-        if not snapshots_dir.exists():
+        history_dir = self.wiki_root / ".snapshots" / "history"
+        if not history_dir.exists():
             return
 
         cutoff = datetime.now() - timedelta(days=self.retention_days)
         deleted_count = 0
         freed_bytes = 0
 
-        for snapshot_file in snapshots_dir.rglob("*.md"):
+        for snapshot_file in history_dir.rglob("*.md"):
             try:
-                file_mtime = datetime.fromtimestamp(
-                    snapshot_file.stat().st_mtime
+                created = datetime.strptime(
+                    snapshot_file.stem, "%Y-%m-%dT%H-%M-%S"
                 )
-                if file_mtime < cutoff:
-                    freed_bytes += snapshot_file.stat().st_size
-                    snapshot_file.unlink()
-                    deleted_count += 1
-            except OSError:
+            except ValueError:
                 continue
 
-        for dir_path in sorted(snapshots_dir.rglob("*"), reverse=True):
+            if created < cutoff:
+                freed_bytes += snapshot_file.stat().st_size
+                snapshot_file.unlink()
+                deleted_count += 1
+
+        for dir_path in sorted(history_dir.rglob("*"), reverse=True):
             if dir_path.is_dir():
                 try:
                     if not list(dir_path.iterdir()):
