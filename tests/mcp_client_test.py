@@ -253,7 +253,12 @@ async def _run_tests(adapter: SessionAdapter | ClientAdapter, r: dict):
                 called += 1
                 status = "error" if result.isError else "ok"
                 preview = extract_text(result.content) if result.content else ""
-                print(f"\n        -> {t.name}: {status}  {preview}")
+                preview = result.content[0].text
+                # parsed_data = json.loads(preview)  # 补全为合法的JSON数组
+                # print(json.dumps(parsed_data, indent=4, ensure_ascii=False))
+                print(f"\n        -> {t.name}: {status}  ")
+                print(preview)
+                
             except Exception as e:
                 r["errors"].append(f"call_tool {t.name} 异常: {e}")
                 print(f"\n        -> {t.name}: EXC  {e}")

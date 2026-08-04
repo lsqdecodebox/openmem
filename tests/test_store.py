@@ -196,6 +196,31 @@ class TestWikiStore:
 
         assert not old_snapshot.exists()
 
+    def test_get_directory_excludes_asset_dirs(self):
+        for t in ("images", "files", "videos"):
+            d = self.wiki_root / t
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "asset.bin").write_bytes(b"x")
+
+        result = json.loads(self.store.get_directory("/"))
+        names = [c["name"] for c in result["children"]]
+        assert "images" not in names
+        assert "files" not in names
+        assert "videos" not in names
+
+    def test_read_memory_rejects_asset_path(self):
+        for p in ("images/a/png", "files/a/bin", "videos/a/mp4"):
+            r = self.store.read_memory(p)
+            assert "error" in r and "资产目录" in r
+
+    def test_write_memory_rejects_asset_path(self):
+        for p in ("/images/a/png", "/files/a/bin", "/videos/a/mp4"):
+            r = self.store.write_memory(content="x", path=p)
+            assert "error" in r and "资产目录" in r
+
+        for t in ("images", "files", "videos"):
+            assert not (self.wiki_root / t).exists()
+
 
 class TestWriteAsset:
     def setup_method(self):

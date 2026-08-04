@@ -99,9 +99,11 @@ remote 模式（需 openmem 服务端以 `openmem --remote` 启动）：
 
 | 工具              | 参数                                      | 说明                                                               |
 | --------------- | --------------------------------------- | ---------------------------------------------------------------- |
-| `get_directory` | `path`（默认 `/`）                          | 获取目录结构树，含每个条目的 title/summary/type/level                          |
-| `read_memory`   | `path`                                  | 读取页面完整内容（含 Front Matter）                                         |
-| `write_memory`  | `content`, `path?`, `tags?`, `summary?` | 覆盖写入记忆；path 为空时返回 `need_path` 提示；更新前自动快照；缺目录自动创建；summary 为空时自动生成 |
+| `get_directory` | `path`（默认 `/`）                          | 获取目录结构树，含每个条目的 title/summary/type/level；不返回 `images/files/videos` 资产目录 |
+| `read_memory`   | `path`                                  | 读取页面完整内容（含 Front Matter）；路径首段为 `images/files/videos` 时报错           |
+| `write_memory`  | `content`, `path?`, `tags?`, `summary?` | 覆盖写入记忆；path 为空时返回 `need_path` 提示；路径首段为 `images/files/videos` 时报错；更新前自动快照；缺目录自动创建；summary 为空时自动生成 |
+| `write_asset`   | `source`, `path`, `filename`, `type?`, `overwrite?` | 写入二进制资产到 `images/files/videos` 目录；`type` 默认 `files`               |
+| `read_asset`    | `path`                                  | 读取资产元信息（绝对路径、相对路径、文件大小）                                          |
 
 ## 配置
 
@@ -159,6 +161,12 @@ wiki/                          ← wiki_root
 │   └── 项目A.md
 ├── 02-学习/
 │   └── Python.md
+├── images/                    ← 资产目录（仅 write_asset/read_asset 可访问）
+│   └── 01-工作/项目A/diagram.png
+├── files/
+│   └── 01-工作/项目A/spec.pdf
+├── videos/
+│   └── 02-学习/demo.mp4
 └── .snapshots/                ← 快照目录（自动管理）
     └── 01-工作/
         └── 项目A/
@@ -185,6 +193,29 @@ tags:
 - **覆盖写入** — 新内容直接覆盖现有正文，不做合并
 - **缺目录自动创建** — 写入路径的父目录不存在时逐级创建
 - **路径安全校验** — 防路径穿越，目录深度不超过 7 层
+
+## 资产管理
+
+系统支持三类二进制资产：`images`、`files`、`videos`，分别存储在 `wiki_root` 下的同名目录。
+
+### 接口隔离规则
+
+| 操作                | 允许的接口                       | 禁止的接口                        |
+| ------------------- | -------------------------------- | --------------------------------- |
+| 读写 Wiki 页面(.md) | `read_memory` / `write_memory`   | —                                 |
+| 读写二进制资产      | `read_asset` / `write_asset`     | `read_memory` / `write_memory`    |
+| 浏览目录结构        | `get_directory`                  | —                                 |
+
+- `get_directory` **不会返回** `images/`、`files/`、`videos/` 目录及其内容
+- `read_memory` / `write_memory` 收到首段为这三类名的路径时，直接返回错误，不执行
+- 资产路径仅在 Markdown 正文中以相对路径形式引用，例如：
+
+  ```markdown
+  ![架构图](images/01-工作/项目A/diagram.png)
+  [需求文档](files/01-工作/项目A/spec.pdf)
+  ```
+
+- LLM 如需在记忆中引用资产，应：先 `write_asset` 上传文件 → 拿到返回的相对路径 → 在 `write_memory` 的正文里以该相对路径嵌入
 
 ## 测试
 

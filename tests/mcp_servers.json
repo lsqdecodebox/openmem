@@ -26,7 +26,7 @@
     },
     "lsq-mem-remote": {
       "type": "remote",
-	    "enable":true,
+	    "enable":false,
       "url": "http://127.0.0.1:6000/mcp"
     }
   }

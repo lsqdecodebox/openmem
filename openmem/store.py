@@ -21,6 +21,14 @@ logger = logging.getLogger(__name__)
 VALID_ASSET_TYPES = {"images", "files", "videos"}
 
 
+def _is_asset_path(path: str) -> str | None:
+    """若 path 首段属于资产类型，返回该类型名；否则返回 None。"""
+    if not path:
+        return None
+    first = path.strip("/").split("/", 1)[0]
+    return first if first in VALID_ASSET_TYPES else None
+
+
 def _error_json(message: str) -> str:
     return json.dumps({"status": "error", "message": message}, ensure_ascii=False)
 
@@ -64,6 +72,12 @@ class WikiStore:
         return json.dumps(result, ensure_ascii=False, indent=2)
 
     def read_memory(self, path: str) -> str:
+        asset_type = _is_asset_path(path)
+        if asset_type:
+            return _error_json(
+                f"路径位于资产目录 '{asset_type}/' 下，禁止通过 read_memory 读取，请使用 read_asset 接口"
+            )
+
         file_path = self._resolve_page_path(path)
 
         if not file_path.exists():
@@ -90,6 +104,12 @@ class WikiStore:
                     "message": "请指定写入路径。请参考核心提示词中的分类规则，确定目标路径。",
                 },
                 ensure_ascii=False,
+            )
+
+        asset_type = _is_asset_path(path)
+        if asset_type:
+            return _error_json(
+                f"路径位于资产目录 '{asset_type}/' 下，禁止通过 write_memory 写入，请使用 write_asset 接口"
             )
 
         path = sanitize_path(path)
@@ -264,8 +284,13 @@ class WikiStore:
         except PermissionError:
             return result
 
+        is_root = dir_path.resolve() == self.wiki_root
+
         for entry in entries:
             if entry.name.startswith("."):
+                continue
+
+            if is_root and entry.is_dir() and entry.name in VALID_ASSET_TYPES:
                 continue
 
             if entry.is_dir():
