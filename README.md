@@ -248,6 +248,31 @@ openmem/
 
 
 
+## 版本历史
+
+### v2.0.0 — Remote 模式
+
+- 新增 `streamable-http` 远程模式，通过 `--remote` 开关启动，支持 `--host/--port/--path` 命令行覆盖（优先级：命令行 > 配置文件 > 默认值）
+- 废弃配置文件 `transport` 字段，启动模式改由命令行控制；remote 默认端口调整为 `6000`
+- 远程模式日志优化：屏蔽 MCP 底层噪声日志、`log_level=warning`、关闭 `access_log`
+- 资产读写逻辑梳理与规范
+- `get_directory` 渐进式披露与压缩机制（`max_chars` 上限，超限自底向上压缩非 summary 文件）
+- OpenCode remote 模式配置示例
+- 修复快照 bug、日志 bug；更新默认 wiki 和 log 位置
+
+### v1.0.0 — Local 模式
+
+- 基于 MCP 协议的个人 Wiki 记忆系统，stdio 本地模式启动
+- Python 包化，`pip install -e .` 安装，提供 `openmem` 命令
+- 五大 MCP 工具：`get_directory` / `read_memory` / `write_memory` / `write_asset` / `read_asset`
+- `core_principles` Prompt 接口
+- 核心机制：写入前快照、覆盖写入、缺目录自动创建、路径安全校验（目录深度 ≤ 7）
+- 资产管理（`images/files/videos` 三类二进制资产，接口隔离规则）
+- 配置文件 `openmem.json`，首次启动自动初始化
+- 定时快照清理（`cleanup_interval_minutes` / `retention_days`）
+- 测试分层（工具函数 / 初始化 / 存储层 / MCP API / MCP 客户端）
+- 支持 Obsidian 可视化
+
 ## 其他资料
 
 https://gist.github.com/rohitg00/2067ab416f7bbe447c1977edaaa681e2

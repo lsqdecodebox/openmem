@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openmem"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Personal Wiki Memory MCP Server"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -21,3 +21,6 @@ dev = [
 
 [project.scripts]
 openmem = "openmem.main:main"
+
+[tool.hatch.version]
+path = "openmem/__init__.py"
