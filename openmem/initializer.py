@@ -1,6 +1,9 @@
 import json
 import logging
+import os
+import secrets
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import frontmatter
@@ -22,6 +25,14 @@ DEFAULT_CONFIG = {
         "host": "127.0.0.1",
         "port": 6000,
         "path": "/mcp",
+    },
+    "auth": {
+        "enabled": True,
+        "users_file": "~/.config/openmem/users.json",
+        "stdio_default_role": "admin",
+        "grant": {
+            "enabled": True,
+        },
     },
     "logging": {
         "level": "INFO",
@@ -166,6 +177,55 @@ def ensure_core_prompts(wiki_root: Path):
         with open(file_path, "w", encoding="utf-8") as f:
             frontmatter.dump(post, f)
         logger.info(f"已创建核心提示词文件: {filename}")
+
+
+def ensure_users_file(users_file: Path):
+    """首次启动引导 admin：优先读环境变量 OPENMEM_ADMIN_API_KEY，否则生成随机 Key 并打印。
+
+    users.json 已存在时不覆盖。
+    """
+    if users_file.exists():
+        logger.info("users.json 已存在")
+        return
+
+    admin_key = os.environ.get("OPENMEM_ADMIN_API_KEY")
+    generated = False
+    if not admin_key:
+        admin_key = f"om_{secrets.token_hex(16)}"
+        generated = True
+
+    data = {
+        "users": [
+            {
+                "api_key": admin_key,
+                "username": "admin",
+                "role": "admin",
+                "status": "active",
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "note": "首次启动自动创建",
+            }
+        ]
+    }
+
+    try:
+        users_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(users_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        logger.info(f"已创建 users.json: {users_file}")
+    except (PermissionError, OSError) as e:
+        print(
+            f"[openmem] 警告：无法创建 users.json {users_file}（{e}），"
+            "remote 模式认证将不可用",
+            file=sys.stderr,
+        )
+        return
+
+    if generated:
+        print(
+            f"\n[openmem] 首次启动：已生成 admin API Key（仅显示一次，请妥善保存）：\n"
+            f"    {admin_key}\n",
+            file=sys.stderr,
+        )
 
 
 def initialize(config_path: Path, wiki_root: Path):

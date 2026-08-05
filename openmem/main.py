@@ -5,11 +5,19 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from fastmcp import FastMCP
+from pydantic import ValidationError
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
 
-from openmem.initializer import initialize, DEFAULT_CONFIG
+from openmem.auth import ApiKeyAuth, UserStore, require_admin
+from openmem.auth_service import (
+    GrantRequest,
+    format_grant_response,
+    grant_user_key,
+    validate_applicant,
+)
+from openmem.initializer import initialize, DEFAULT_CONFIG, ensure_users_file
 from openmem.store import WikiStore
-
-mcp = FastMCP("Personal Wiki Memory")
 
 CONFIG_PATH = Path.home() / ".config" / "openmem" / "openmem.json"
 
@@ -60,6 +68,25 @@ logger = logging.getLogger(__name__)
 wiki_root = Path(config.get("wiki_root", "./wiki")).expanduser()
 initialize(CONFIG_PATH, wiki_root)
 
+auth_cfg = config.get("auth", {})
+auth_enabled = auth_cfg.get("enabled", True)
+users_file = Path(auth_cfg.get("users_file", "~/.config/openmem/users.json")).expanduser()
+
+if auth_enabled:
+    ensure_users_file(users_file)
+    user_store = UserStore(users_file)
+    auth_provider = ApiKeyAuth(user_store)
+else:
+    user_store = None
+    auth_provider = None
+
+# grant 服务开关：独立于 auth.enabled，但需要 user_store 写入 users.json
+# 因此当 auth.enabled=false（无 user_store）时，grant 端点即使开启也无法签发
+grant_cfg = auth_cfg.get("grant", {})
+grant_enabled = grant_cfg.get("enabled", True) and user_store is not None
+
+mcp = FastMCP("Personal Wiki Memory", auth=auth_provider)
+
 store = WikiStore(
     wiki_root=wiki_root,
     max_depth=config.get("max_depth", 7),
@@ -109,6 +136,9 @@ def write_memory(
     Returns:
         最终页面路径
     """
+    err = require_admin("write_memory")
+    if err:
+        return err
     return store.write_memory(content=content, path=path, tags=tags, summary=summary)
 
 
@@ -132,6 +162,9 @@ def write_asset(
     Returns:
         写入结果，包含状态、路径、文件名、类型、大小
     """
+    err = require_admin("write_asset")
+    if err:
+        return err
     return store.write_asset(source=source, path=path, filename=filename, type=type, overwrite=overwrite)
 
 
@@ -146,6 +179,64 @@ def read_asset(path: str) -> str:
         资产信息，包含绝对路径、相对路径、文件大小
     """
     return store.read_asset(path=path)
+
+
+# ------------------------------ 认证服务端点 ------------------------------
+# /auth/grant 为 custom_route，不经过 TokenVerifier，可在无 key 时访问。
+# 由 auth.grant.enabled 控制开关；签发的 key 永远是 user 角色，写入 users.json。
+
+@mcp.custom_route("/auth/grant", methods=["POST"])
+async def auth_grant(request: Request) -> Response:
+    """认证服务端点：根据 applicantCode 签发（或幂等返回）user 级 API Key。
+
+    applicantCode 由内部系统发送，当前不校验合法性（validate_applicant 为 no-op 钩子，
+    联调期可改）。同 applicantCode 再次请求返回同一个 key，不签新 key。
+    """
+    if not grant_enabled:
+        return JSONResponse(
+            {"status": "error", "message": "grant 服务已被禁用"},
+            status_code=403,
+        )
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            {"status": "error", "message": "请求体必须是合法 JSON"},
+            status_code=400,
+        )
+
+    try:
+        req = GrantRequest.model_validate(body)
+    except ValidationError as e:
+        return JSONResponse(
+            {"status": "error", "message": "请求体校验失败", "detail": e.errors()},
+            status_code=422,
+        )
+
+    # 凭证校验钩子（当前 no-op，联调期只改 validate_applicant）
+    err = validate_applicant(req)
+    if err is not None:
+        return JSONResponse(
+            {"status": "error", "message": err},
+            status_code=401,
+        )
+
+    try:
+        user, is_new = grant_user_key(user_store, req)
+    except ValueError as e:
+        return JSONResponse(
+            {"status": "error", "message": str(e)},
+            status_code=400,
+        )
+    except OSError as e:
+        logger.error(f"grant 写入 users.json 失败: {e}")
+        return JSONResponse(
+            {"status": "error", "message": "服务端写入用户失败"},
+            status_code=500,
+        )
+
+    return JSONResponse(format_grant_response(user, is_new), status_code=200)
 
 
 @mcp.prompt(name="core_principles", description="记忆系统核心提示词，供LLM调度决策")
