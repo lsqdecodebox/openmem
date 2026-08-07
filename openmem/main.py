@@ -200,6 +200,8 @@ async def auth_grant(request: Request) -> Response:
 
     try:
         body = await request.json()
+        logger.info(f"{body}")
+        # 获得cagent平台的输入 {'applicantCode': '60305735', 'applicantName': '60305735', 'expireTime': '2026-08-07 18:27:14', 'tokenNo': 'mcp_pers_0dbf8a8bdec24a1a9976985198c73a93', 'tokenType': 1}
     except Exception:
         return JSONResponse(
             {"status": "error", "message": "请求体必须是合法 JSON"},
