@@ -414,9 +414,30 @@ async def test_remote_server(name: str, server_config: dict) -> dict:
         r["errors"].append("url 字段缺失")
         return r
 
+    # ── fastmcp Client 认证机制适配 ──────────────────────────────
+    # 背景：config 中的认证信息以 opencode 风格写在 headers.Authorization 字段
+    # （形如 "Bearer om_xxx"），但 fastmcp.Client 不接受 headers= 形参，
+    # 其签名仅支持 auth: httpx.Auth | "oauth" | str | None。
+    #
+    # 机制差异：
+    #   - curl/opencode：直接把 headers.Authorization 原样发到 HTTP 请求
+    #   - fastmcp.Client：必须通过 auth= 参数传入，内部经
+    #     StreamableHttpTransport._set_auth → BearerAuth 包装，
+    #     由 BearerAuth.auth_flow 自动拼装 "Authorization: Bearer <token>" 头
+    #
+    # 因此这里需做两步额外操作：
+    #   1. 从 headers.Authorization 剥掉 "Bearer " 前缀，只取纯 token
+    #      （否则 BearerAuth 会再拼一次变成 "Bearer Bearer om_xxx"）
+    #   2. 通过 Client(url, auth=token) 传入，由 fastmcp 内部完成头注入
+    # ─────────────────────────────────────────────────────────────
+    headers = server_config.get("headers", {})
+    auth_header = headers.get("Authorization", "")
+    token = auth_header[len("Bearer "):] if auth_header.startswith("Bearer ") else None
+
     r = _new_result(name)
     try:
-        async with Client(url) as client:
+        client_kwargs = {"auth": token} if token else {}
+        async with Client(url, **client_kwargs) as client:
             adapter = ClientAdapter(client)
             await asyncio.wait_for(_run_tests(adapter, r), timeout=OP_TIMEOUT)
     except asyncio.TimeoutError:

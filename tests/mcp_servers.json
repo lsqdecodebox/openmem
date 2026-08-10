@@ -29,6 +29,14 @@
       "type": "remote",
 	    "enable":false,
       "url": "http://127.0.0.1:6000/mcp"
+    },
+    "openmem-sit-remote": {
+      "type": "remote",
+	    "enable":true,
+      "url": "http://10.59.7.249:6000/mcp",
+      "headers": {
+        "Authorization": "Bearer om_04350ab4f6d696760e04d45a0f095828"
+      }
     }
   }
 }
