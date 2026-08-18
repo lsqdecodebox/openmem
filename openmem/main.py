@@ -9,7 +9,14 @@ from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from openmem.auth import ApiKeyAuth, UserStore, require_admin
+from openmem.auth import (
+    ADMIN_TOOL_NAMES,
+    ApiKeyAuth,
+    Role,
+    UserStore,
+    get_current_role,
+    require_admin,
+)
 from openmem.auth_service import (
     GrantRequest,
     format_grant_response,
@@ -85,7 +92,23 @@ else:
 grant_cfg = auth_cfg.get("grant", {})
 grant_enabled = grant_cfg.get("enabled", True) and user_store is not None
 
-mcp = FastMCP("Personal Wiki Memory", auth=auth_provider)
+
+class RoleFilteredMCP(FastMCP):
+    """按角色过滤 tools/list 返回的工具。
+
+    user 角色在 listing 阶段就看不到 admin 专属工具（write_memory / write_asset）。
+    tools/call 阶段的 ``require_admin()`` 守卫保留作为纵深防御，防止恶意客户端
+    绕过 listing 直接构造 call 请求。
+    """
+
+    async def list_tools(self):
+        tools = await super().list_tools()
+        if get_current_role() == Role.ADMIN:
+            return tools
+        return [t for t in tools if t.name not in ADMIN_TOOL_NAMES]
+
+
+mcp = RoleFilteredMCP("Personal Wiki Memory", auth=auth_provider)
 
 store = WikiStore(
     wiki_root=wiki_root,

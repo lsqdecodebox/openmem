@@ -121,11 +121,18 @@ remote 模式（需 openmem 服务端以 `openmem --remote` 启动，需 Bearer 
 
 ### 权限矩阵
 
-| 角色 | get_directory | read_memory | read_asset | write_memory | write_asset |
-| --- |:---:|:---:|:---:|:---:|:---:|
-| admin | ✓ | ✓ | ✓ | ✓ | ✓ |
-| user | ✓ | ✓ | ✓ | ✗ | ✗ |
-| 无 Key / 无效 Key（remote） | — 协议层 401 拒绝 — | | | | |
+权限分两层拦截：
+
+1. **listing 层**（`tools/list`）：user 角色在列工具时就**看不到**写工具，admin 看到全部
+2. **call 层**（`tools/call`）：`write_memory` / `write_asset` 入口的 `require_admin()` 守卫，作为纵深防御防止绕过 listing 直接调用
+
+| 角色 | get_directory | read_memory | read_asset | write_memory | write_asset | tools/list 可见写工具 |
+| --- |:---:|:---:|:---:|:---:|:---:|:---:|
+| admin | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| user | ✓ | ✓ | ✓ | ✗ | ✗ | ✗（listing 阶段即隐藏） |
+| 无 Key / 无效 Key（remote） | — 协议层 401 拒绝 — | | | | | |
+
+> 实现于 `main.py` 的 `RoleFilteredMCP.list_tools()`：按 `get_current_role()` 过滤 `ADMIN_TOOL_NAMES`（自动从权限矩阵派生）。stdio 本地模式默认 admin，listing 不过滤。
 
 ### users.json 格式
 
@@ -405,7 +412,8 @@ pytest tests/ -v
 | `test_store.py`       | 存储层     | WikiStore 读写、快照                     |
 | `test_auth.py`        | 认证权限    | ApiKeyAuth / UserStore / 权限矩阵 / 首次引导 |
 | `test_auth_service.py`| 认证服务    | GrantRequest / grant_user_key 幂等发证 / grant 端点契约 / 端到端权限 |
-| `test_mcp_api.py`     | MCP API | 直接调用 store 方法验证接口契约                 |
+| `test_tool_visibility.py` | tools/list 可见性 | RoleFilteredMCP 按角色过滤 listing / require_admin 纵深防御 |
+| `test_mcp_api.py`     | MCP API | 直接调用 store 方法验证接口契约 |
 | `test_mcp_client.py`  | MCP 客户端 | 通过 `fastmcp.Client` 模拟客户端连接，走完整协议链路 |
 
 ## 项目结构
@@ -413,7 +421,7 @@ pytest tests/ -v
 ```
 openmem/
 ├── __init__.py       # 版本号
-├── main.py           # FastMCP 入口、工具/Prompt 注册、日志配置、权限守卫、grant 端点
+├── main.py           # FastMCP 入口、工具/Prompt 注册、日志配置、权限守卫、grant 端点、RoleFilteredMCP listing 过滤
 ├── initializer.py    # 启动初始化：配置文件、Wiki 根目录、users.json 引导
 ├── auth.py           # API Key 认证：ApiKeyAuth / UserStore / 权限矩阵
 ├── auth_service.py   # 认证服务：grant 端点逻辑（GrantRequest / grant_user_key / 幂等发证）
@@ -424,6 +432,14 @@ openmem/
 
 
 ## 版本历史
+
+### v2.5.0 — tools/list 角色可见性过滤
+
+- 新增 `RoleFilteredMCP`（`openmem/main.py`），重写 `FastMCP.list_tools()`：user 角色在 listing 阶段就看不到 `write_memory` / `write_asset`，admin 与 stdio 本地模式不变
+- 过滤集合复用 `auth.ADMIN_TOOL_NAMES`（自动从 `PERMISSIONS` 派生 admin 独占工具），权限矩阵变更时过滤范围自动同步
+- `tools/call` 阶段的 `require_admin()` 守卫保留作为纵深防御，防止绕过 listing 直接调用
+- `README.md` 权限矩阵补充 listing 可见性说明
+- 新增 `tests/test_tool_visibility.py` 9 条测试用例
 
 ### v2.4.0 — 认证服务（grant 端点）
 
