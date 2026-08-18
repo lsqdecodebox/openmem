@@ -289,9 +289,12 @@ wiki/                          ← wiki_root
 ├── 用户偏好习惯.md
 ├── Agent行为指南.md
 ├── Wiki整理指南.md
+├── summary.md                 ← 根目录元数据（可选）
 ├── 01-工作/                   ← 用户分类目录
+│   ├── summary.md             ← 目录元数据（可选，描述该目录主题）
 │   └── 项目A.md
 ├── 02-学习/
+│   ├── summary.md
 │   └── Python.md
 ├── images/                    ← 资产目录（仅 write_asset/read_asset 可访问）
 │   └── 01-工作/项目A/diagram.png
@@ -318,6 +321,44 @@ tags:
 ---
 项目进度记录
 ```
+
+### 目录元数据（summary.md）
+
+每个目录可（按需）放置一个 `summary.md`，作为该目录的**元数据文件**而非普通页面。它让 LLM 在 `get_directory` 浏览目录树时无需逐个打开子文件，即可了解目录主题，实现"目录摘要 → 页面摘要 → 完整页面"的逐层下钻，控制 token 消耗。
+
+**触发与格式**
+
+- 写入路径以 `/summary` 结尾时进入 summary 分支（`store.py` 的 `write_memory` 方法）
+- 强制 `type: directory_summary`，**正文强制清空**
+- 真实摘要存于 Front Matter 的 `summary` 字段；缺省时由正文自动生成（剥除 Markdown 标记后取前 100 字加 `...`）
+
+Front Matter 样例：
+
+```markdown
+---
+title: summary
+type: directory_summary
+level: 1
+summary: 个人信息总览
+tags:
+- 个人
+---
+```
+
+**目录树"上提"语义**
+
+`get_directory` 构建目录树时（`store.py` 的 `_build_directory_tree` 方法）：
+
+- `summary.md` **不作为子条目返回**，其 `summary`/`tags` **上提为该目录节点自身的元数据**
+- 普通 `.md` 文件的 `summary` 字段作为该子条目的摘要展示
+- 目录树超过 `max_chars` 自底向上压缩时，`summary.md` 享有豁免，不进入压缩文件名列表，保证目录摘要始终可见
+
+**双层摘要体系**
+
+| 层级 | 载体 | type | 作用 |
+| --- | --- | --- | --- |
+| 目录级 | `summary.md` | `directory_summary` | 描述"这个目录是关于什么的"，便于 LLM 快速定位 |
+| 页面级 | 普通 page 的 `summary` 字段 | `page` | 描述"这一页是关于什么的"，便于 LLM 决定是否深入读取 |
 
 ## 核心机制
 
