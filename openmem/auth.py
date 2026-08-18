@@ -3,7 +3,9 @@
 设计要点：
 - ``ApiKeyAuth`` 继承 FastMCP ``TokenVerifier``，仅在 HTTP 传输层生效（stdio 免疫）。
 - ``UserStore`` 通过 mtime 缓存实现 users.json 热更新，无需重启。
-- 工具内通过 ``get_current_role()`` 读取当前角色；写工具用 ``require_admin()`` 守卫。
+- ``require_admin_role`` 作为 FastMCP ``AuthCheck``，通过 ``@mcp.tool(auth=...)``
+  同时作用于 listing（隐藏工具）与 call（拒绝调用）两个阶段；stdio 由 FastMCP
+  ``_get_auth_context`` 的 ``skip_auth=True`` 自动跳过。
 """
 
 import json
@@ -183,20 +185,27 @@ def get_current_role() -> str:
     return role if role in (Role.ADMIN, Role.USER) else Role.USER
 
 
-def require_admin(tool_name: str) -> str | None:
-    """写工具入口校验。
+def require_admin_role(ctx) -> bool:
+    """FastMCP AuthCheck：仅 admin 角色可访问。
 
-    返回 None 表示放行；返回 JSON 字符串表示权限拒绝（直接作为工具结果返回）。
+    作为 ``@mcp.tool(auth=...)`` 的入参，由 FastMCP 在 **listing 和 call** 两个阶段
+    自动调用：
+    - listing 阶段（``list_tools``）：返回 False 时工具被静默跳过 → user 看不到
+    - call 阶段（``_get_tool``）：返回 False 时返回 None → 协议层报"工具不存在"
+
+    stdio 传输由 FastMCP ``_get_auth_context`` 的 ``skip_auth=True`` 自动跳过本检查，
+    即 stdio 默认全权放行（信任本机）。
+
+    Args:
+        ctx: ``fastmcp.utilities.authorization.AuthContext``，``ctx.token`` 为
+            ``AccessToken | None``，``claims["role"]`` 由 ``ApiKeyAuth.verify_token``
+            注入。
+
+    Returns:
+        True=允许访问；False=拒绝。
     """
-    role = get_current_role()
-    allowed = PERMISSIONS.get(tool_name, set())
-    if role not in allowed:
-        logger.warning(f"权限拒绝: role={role}, tool={tool_name}")
-        return json.dumps(
-            {
-                "status": "forbidden",
-                "message": f"角色 '{role}' 无权调用 {tool_name}，该操作需要 admin 权限",
-            },
-            ensure_ascii=False,
-        )
-    return None
+    token = getattr(ctx, "token", None)
+    if token is None:
+        return False
+    claims = getattr(token, "claims", None) or {}
+    return claims.get("role") == Role.ADMIN

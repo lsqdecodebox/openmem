@@ -444,8 +444,14 @@ class TestEndToEnd:
 
     @pytest.mark.asyncio
     async def test_grant签发的key无写权限(self, store: UserStore):
-        """端到端验证权限矩阵：user 角色 write_memory 应被拒"""
-        from openmem.auth import require_admin, PERMISSIONS
+        """端到端验证权限矩阵：user 角色 write_memory 应被拒
+
+        FastMCP 原生 tool.auth 机制在 listing 和 call 阶段都会调 require_admin_role。
+        这里验证其输入（token.claims['role']）与权限矩阵一致：
+        user 不在 write_memory 允许集合 → require_admin_role 应返回 False。
+        """
+        from openmem.auth import require_admin_role, PERMISSIONS
+        from types import SimpleNamespace
         req = GrantRequest(applicantCode="APP-001")
         user, _ = grant_user_key(store, req)
 
@@ -456,3 +462,7 @@ class TestEndToEnd:
         # user 角色不在 write_memory 允许集合
         assert Role.USER not in PERMISSIONS["write_memory"]
         assert Role.USER in PERMISSIONS["read_memory"]
+
+        # 模拟 FastMCP AuthContext，验证 require_admin_role 对 user 拒绝写工具
+        ctx = SimpleNamespace(token=token)
+        assert require_admin_role(ctx) is False

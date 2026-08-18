@@ -11,7 +11,7 @@ from openmem.auth import (
     Role,
     PERMISSIONS,
     get_current_role,
-    require_admin,
+    require_admin_role,
 )
 from openmem.initializer import ensure_users_file
 
@@ -130,7 +130,17 @@ class TestUserStore:
         assert store.find_by_key("any") is None
 
 
-# ---------- get_current_role / require_admin ----------
+# ---------- get_current_role / require_admin_role ----------
+
+from types import SimpleNamespace
+
+
+def _make_auth_ctx(role: str | None):
+    """构造模拟 AuthContext：含 token.claims['role']。role=None 表示无 token。"""
+    if role is None:
+        return SimpleNamespace(token=None)
+    return SimpleNamespace(token=SimpleNamespace(claims={"role": role}))
+
 
 class TestRoleChecks:
     def test_get_current_role_stdio(self):
@@ -138,29 +148,17 @@ class TestRoleChecks:
         role = get_current_role()
         assert role == Role.ADMIN
 
-    def test_require_admin_allows_admin(self):
-        """stdio 默认 admin → write_memory 放行"""
-        result = require_admin("write_memory")
-        assert result is None
+    def test_require_admin_role_allows_admin(self):
+        """admin 角色 → 放行"""
+        assert require_admin_role(_make_auth_ctx(Role.ADMIN)) is True
 
-    def test_require_admin_blocks_user(self, monkeypatch):
-        """模拟 user 角色 → write_memory 被拒"""
-        from openmem import auth as auth_module
+    def test_require_admin_role_blocks_user(self):
+        """user 角色 → 拒绝"""
+        assert require_admin_role(_make_auth_ctx(Role.USER)) is False
 
-        monkeypatch.setattr(auth_module, "get_current_role", lambda: Role.USER)
-        result = require_admin("write_memory")
-        assert result is not None
-        data = json.loads(result)
-        assert data["status"] == "forbidden"
-        assert "write_memory" in data["message"]
-
-    def test_require_admin_allows_user_read(self, monkeypatch):
-        """user 角色 → read_memory 放行"""
-        from openmem import auth as auth_module
-
-        monkeypatch.setattr(auth_module, "get_current_role", lambda: Role.USER)
-        result = require_admin("read_memory")
-        assert result is None
+    def test_require_admin_role_blocks_no_token(self):
+        """无 token（未认证）→ 拒绝"""
+        assert require_admin_role(_make_auth_ctx(None)) is False
 
     def test_permissions_matrix(self):
         """验证权限矩阵完整性"""

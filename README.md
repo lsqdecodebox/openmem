@@ -121,10 +121,12 @@ remote 模式（需 openmem 服务端以 `openmem --remote` 启动，需 Bearer 
 
 ### 权限矩阵
 
-权限分两层拦截：
+权限基于 FastMCP 原生 `tool.auth` 机制，**listing 与 call 双层拦截**：
 
-1. **listing 层**（`tools/list`）：user 角色在列工具时就**看不到**写工具，admin 看到全部
-2. **call 层**（`tools/call`）：`write_memory` / `write_asset` 入口的 `require_admin()` 守卫，作为纵深防御防止绕过 listing 直接调用
+1. **listing 层**（`tools/list`）：FastMCP `list_tools` 内部对每个工具调用其 `auth` check，返回 False 时**静默跳过** → user 看不到写工具
+2. **call 层**（`tools/call`）：FastMCP `_get_tool` 在执行工具函数前再次调用 `auth` check，返回 False 时返回 None → 协议层报"工具不存在"
+
+`write_memory` / `write_asset` 通过 `@mcp.tool(auth=require_admin_role)` 注册 auth check（`openmem/auth.py`），该 check 读取 `AccessToken.claims["role"]`，仅 admin 返回 True。stdio 传输由 FastMCP `_get_auth_context` 的 `skip_auth=True` 自动跳过所有 auth check，即本地模式全权放行。
 
 | 角色 | get_directory | read_memory | read_asset | write_memory | write_asset | tools/list 可见写工具 |
 | --- |:---:|:---:|:---:|:---:|:---:|:---:|
@@ -132,7 +134,7 @@ remote 模式（需 openmem 服务端以 `openmem --remote` 启动，需 Bearer 
 | user | ✓ | ✓ | ✓ | ✗ | ✗ | ✗（listing 阶段即隐藏） |
 | 无 Key / 无效 Key（remote） | — 协议层 401 拒绝 — | | | | | |
 
-> 实现于 `main.py` 的 `RoleFilteredMCP.list_tools()`：按 `get_current_role()` 过滤 `ADMIN_TOOL_NAMES`（自动从权限矩阵派生）。stdio 本地模式默认 admin，listing 不过滤。
+> user 调用写工具时，FastMCP 协议层返回"工具不存在"错误（非 forbidden JSON），LLM 客户端会将其视为工具不可用。
 
 ### users.json 格式
 
@@ -421,9 +423,9 @@ pytest tests/ -v
 ```
 openmem/
 ├── __init__.py       # 版本号
-├── main.py           # FastMCP 入口、工具/Prompt 注册、日志配置、权限守卫、grant 端点、RoleFilteredMCP listing 过滤
+├── main.py           # FastMCP 入口、工具/Prompt 注册、日志配置、grant 端点、工具级 auth check
 ├── initializer.py    # 启动初始化：配置文件、Wiki 根目录、users.json 引导
-├── auth.py           # API Key 认证：ApiKeyAuth / UserStore / 权限矩阵
+├── auth.py           # API Key 认证：ApiKeyAuth / UserStore / 权限矩阵 / require_admin_role AuthCheck
 ├── auth_service.py   # 认证服务：grant 端点逻辑（GrantRequest / grant_user_key / 幂等发证）
 ├── store.py          # WikiStore：目录导航、页面读写、快照管理
 └── utils.py          # 工具函数：路径校验、Front Matter、合并策略
@@ -435,11 +437,13 @@ openmem/
 
 ### v2.5.0 — tools/list 角色可见性过滤
 
-- 新增 `RoleFilteredMCP`（`openmem/main.py`），重写 `FastMCP.list_tools()`：user 角色在 listing 阶段就看不到 `write_memory` / `write_asset`，admin 与 stdio 本地模式不变
-- 过滤集合复用 `auth.ADMIN_TOOL_NAMES`（自动从 `PERMISSIONS` 派生 admin 独占工具），权限矩阵变更时过滤范围自动同步
-- `tools/call` 阶段的 `require_admin()` 守卫保留作为纵深防御，防止绕过 listing 直接调用
+- 改用 FastMCP 原生 `tool.auth` 机制实现 listing + call 双层拦截：`write_memory` / `write_asset` 通过 `@mcp.tool(auth=require_admin_role)` 注册 auth check
+- 新增 `require_admin_role(ctx)` AuthCheck（`openmem/auth.py`）：读 `AccessToken.claims["role"]`，仅 admin 返回 True；stdio 由 FastMCP `_get_auth_context` 的 `skip_auth=True` 自动跳过
+- listing 阶段：FastMCP `list_tools` 对每个工具调 auth check，返回 False 时静默跳过 → user 看不到写工具
+- call 阶段：FastMCP `_get_tool` 在执行前调 auth check，返回 False 时返回 None → 协议层报"工具不存在"
+- 删除旧 `require_admin(tool_name)` 工具入口守卫及其在 `main.py` 的调用（被 FastMCP 原生机制取代，避免死代码）
 - `README.md` 权限矩阵补充 listing 可见性说明
-- 新增 `tests/test_tool_visibility.py` 9 条测试用例
+- 新增 `tests/test_tool_visibility.py` 11 条测试用例；`tests/test_auth.py` / `test_auth_service.py` 同步迁移到 `require_admin_role`
 
 ### v2.4.0 — 认证服务（grant 端点）
 
