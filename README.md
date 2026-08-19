@@ -166,10 +166,12 @@ remote 模式（需 openmem 服务端以 `openmem --remote` 启动，需 Bearer 
 
 ### 首次启动
 
-首次运行且 `users.json` 不存在时自动引导 admin：
+首次运行且 `users.json` 不存在时自动引导 admin + user 两个角色：
 
-1. 优先读环境变量 `OPENMEM_ADMIN_API_KEY`
-2. 无环境变量则生成 `om_<32hex>` 随机 Key（不含角色信息），在控制台**一次性打印**
+1. **admin key**：优先读环境变量 `OPENMEM_ADMIN_API_KEY`，无则生成 `om_<32hex>` 随机 Key
+2. **user key**：优先读环境变量 `OPENMEM_USER_API_KEY`，无则生成 `om_<32hex>` 随机 Key
+
+本次生成的 Key 在控制台**一次性打印**（环境变量来源的不打印，因用户已知）。user 角色 Key 仅可调用只读工具（`get_directory` / `read_memory` / `read_asset`），可直接配置到只读客户端，免去手动调 `/auth/grant` 端点。
 
 ### 认证服务（grant 端点）
 
@@ -434,6 +436,14 @@ openmem/
 
 
 ## 版本历史
+
+### v2.5.1 — 默认 user key 引导
+
+- 首次启动 `ensure_users_file` 由仅引导 admin 扩展为 admin + user 双角色引导
+- user key 来源对齐 admin：优先读环境变量 `OPENMEM_USER_API_KEY`，无则生成 `om_<32hex>` 随机 Key
+- 生成的 Key 一次性 stderr 打印（环境变量来源的不打印）；user 条目 `username=default-user`、`note="首次启动自动创建（只读）"`，不带 `applicantCode`（保留给 grant 端点签发的 key）
+- 免去手动调 `/auth/grant` 端点即可获得只读客户端 Key
+- `tests/test_auth.py` 的 `TestEnsureUsersFile` 由 4 条扩展为 7 条用例
 
 ### v2.5.0 — tools/list 角色可见性过滤
 

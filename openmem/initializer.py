@@ -180,7 +180,10 @@ def ensure_core_prompts(wiki_root: Path):
 
 
 def ensure_users_file(users_file: Path):
-    """首次启动引导 admin：优先读环境变量 OPENMEM_ADMIN_API_KEY，否则生成随机 Key 并打印。
+    """首次启动引导：admin + 默认 user 两个角色。
+
+    - admin key：优先读环境变量 ``OPENMEM_ADMIN_API_KEY``，否则随机生成并打印
+    - user   key：优先读环境变量 ``OPENMEM_USER_API_KEY``，否则随机生成并打印
 
     users.json 已存在时不覆盖。
     """
@@ -189,11 +192,20 @@ def ensure_users_file(users_file: Path):
         return
 
     admin_key = os.environ.get("OPENMEM_ADMIN_API_KEY")
-    generated = False
     if not admin_key:
         admin_key = f"om_{secrets.token_hex(16)}"
-        generated = True
+        admin_printed = True
+    else:
+        admin_printed = False
 
+    user_key = os.environ.get("OPENMEM_USER_API_KEY")
+    if not user_key:
+        user_key = f"om_{secrets.token_hex(16)}"
+        user_printed = True
+    else:
+        user_printed = False
+
+    now = datetime.now().isoformat(timespec="seconds")
     data = {
         "users": [
             {
@@ -201,9 +213,17 @@ def ensure_users_file(users_file: Path):
                 "username": "admin",
                 "role": "admin",
                 "status": "active",
-                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "created_at": now,
                 "note": "首次启动自动创建",
-            }
+            },
+            {
+                "api_key": user_key,
+                "username": "default-user",
+                "role": "user",
+                "status": "active",
+                "created_at": now,
+                "note": "首次启动自动创建（只读）",
+            },
         ]
     }
 
@@ -220,12 +240,15 @@ def ensure_users_file(users_file: Path):
         )
         return
 
-    if generated:
-        print(
-            f"\n[openmem] 首次启动：已生成 admin API Key（仅显示一次，请妥善保存）：\n"
-            f"    {admin_key}\n",
-            file=sys.stderr,
-        )
+    # 环境变量来源的 key 不打印（用户已知）；仅打印本次生成的 key
+    if admin_printed or user_printed:
+        lines = ["\n[openmem] 首次启动：已生成 API Key（仅显示一次，请妥善保存）："]
+        if admin_printed:
+            lines.append(f"    admin: {admin_key}")
+        if user_printed:
+            lines.append(f"    user : {user_key}")
+        lines.append("")
+        print("\n".join(lines), file=sys.stderr)
 
 
 def initialize(config_path: Path, wiki_root: Path):

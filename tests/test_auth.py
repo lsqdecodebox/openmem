@@ -172,18 +172,22 @@ class TestRoleChecks:
 # ---------- ensure_users_file (首次引导) ----------
 
 class TestEnsureUsersFile:
-    def test_creates_admin(self, tmp_path: Path, monkeypatch):
-        """users.json 不存在 → 创建含 1 个 admin"""
+    def test_creates_admin_and_user(self, tmp_path: Path, monkeypatch):
+        """users.json 不存在 → 创建含 admin + user 两个角色"""
         monkeypatch.delenv("OPENMEM_ADMIN_API_KEY", raising=False)
+        monkeypatch.delenv("OPENMEM_USER_API_KEY", raising=False)
         users_file = tmp_path / "users.json"
         ensure_users_file(users_file)
 
         assert users_file.exists()
         data = json.loads(users_file.read_text(encoding="utf-8"))
-        assert len(data["users"]) == 1
-        assert data["users"][0]["role"] == "admin"
-        assert data["users"][0]["status"] == "active"
-        assert data["users"][0]["api_key"].startswith("om_")
+        assert len(data["users"]) == 2
+        roles = [u["role"] for u in data["users"]]
+        assert "admin" in roles
+        assert "user" in roles
+        for u in data["users"]:
+            assert u["status"] == "active"
+            assert u["api_key"].startswith("om_")
 
     def test_idempotent(self, tmp_path: Path):
         """users.json 已存在 → 不覆盖"""
@@ -197,24 +201,66 @@ class TestEnsureUsersFile:
         assert data["users"][0]["api_key"] == "existing_key"
 
     def test_admin_from_env(self, tmp_path: Path, monkeypatch):
-        """环境变量 OPENMEM_ADMIN_API_KEY → 用该值"""
+        """环境变量 OPENMEM_ADMIN_API_KEY → admin 用该值"""
         monkeypatch.setenv("OPENMEM_ADMIN_API_KEY", "om_from_env_123")
+        monkeypatch.delenv("OPENMEM_USER_API_KEY", raising=False)
         users_file = tmp_path / "users.json"
         ensure_users_file(users_file)
 
         data = json.loads(users_file.read_text(encoding="utf-8"))
-        assert data["users"][0]["api_key"] == "om_from_env_123"
+        admin = next(u for u in data["users"] if u["role"] == "admin")
+        assert admin["api_key"] == "om_from_env_123"
+
+    def test_user_from_env(self, tmp_path: Path, monkeypatch):
+        """环境变量 OPENMEM_USER_API_KEY → user 用该值"""
+        monkeypatch.delenv("OPENMEM_ADMIN_API_KEY", raising=False)
+        monkeypatch.setenv("OPENMEM_USER_API_KEY", "om_user_env_456")
+        users_file = tmp_path / "users.json"
+        ensure_users_file(users_file)
+
+        data = json.loads(users_file.read_text(encoding="utf-8"))
+        user = next(u for u in data["users"] if u["role"] == "user")
+        assert user["api_key"] == "om_user_env_456"
+
+    def test_user_fields(self, tmp_path: Path, monkeypatch):
+        """user 条目字段：username=default-user, role=user, status=active, 有 note"""
+        monkeypatch.delenv("OPENMEM_ADMIN_API_KEY", raising=False)
+        monkeypatch.delenv("OPENMEM_USER_API_KEY", raising=False)
+        users_file = tmp_path / "users.json"
+        ensure_users_file(users_file)
+
+        data = json.loads(users_file.read_text(encoding="utf-8"))
+        user = next(u for u in data["users"] if u["role"] == "user")
+        assert user["username"] == "default-user"
+        assert user["status"] == "active"
+        assert "note" in user
+        assert "created_at" in user
+        # 不应携带 applicantCode（仅 grant 端点签发的 key 才有）
+        assert "applicantCode" not in user
 
     def test_generated_key_format(self, tmp_path: Path, monkeypatch):
-        """无环境变量 → 生成 om_ 前缀 + 32 hex（不泄露角色信息）"""
+        """无环境变量 → admin/user 均 om_ 前缀 + 32 hex（不泄露角色信息）"""
         monkeypatch.delenv("OPENMEM_ADMIN_API_KEY", raising=False)
+        monkeypatch.delenv("OPENMEM_USER_API_KEY", raising=False)
         users_file = tmp_path / "users.json"
         ensure_users_file(users_file)
 
         data = json.loads(users_file.read_text(encoding="utf-8"))
-        key = data["users"][0]["api_key"]
-        assert key.startswith("om_")
-        # om_ (3) + 32 hex = 35
-        assert len(key) == 35
-        assert "admin" not in key
-        assert "user" not in key
+        for u in data["users"]:
+            key = u["api_key"]
+            assert key.startswith("om_")
+            # om_ (3) + 32 hex = 35
+            assert len(key) == 35
+            assert "admin" not in key
+            assert "user" not in key
+
+    def test_admin_and_user_keys_distinct(self, tmp_path: Path, monkeypatch):
+        """admin 与 user 的 api_key 不能相同"""
+        monkeypatch.delenv("OPENMEM_ADMIN_API_KEY", raising=False)
+        monkeypatch.delenv("OPENMEM_USER_API_KEY", raising=False)
+        users_file = tmp_path / "users.json"
+        ensure_users_file(users_file)
+
+        data = json.loads(users_file.read_text(encoding="utf-8"))
+        keys = [u["api_key"] for u in data["users"]]
+        assert len(set(keys)) == 2
