@@ -1,6 +1,7 @@
 import json
 import shutil
 import logging
+import subprocess
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -278,6 +279,118 @@ class WikiStore:
                 "absolute_path": str(asset_path),
                 "relative_path": safe_path,
                 "size": file_size,
+            },
+            ensure_ascii=False,
+        )
+
+    def search_memory(
+        self,
+        pattern: str,
+        path: str = "/",
+        is_regex: bool = False,
+        case_sensitive: bool = False,
+        whole_word: bool = False,
+        context: int = 0,
+        max_results: int = 50,
+    ) -> str:
+        """在记忆中检索包含指定模式的页面，对齐 ``grep -r -n`` 行为。
+
+        通过 ``subprocess`` 调用系统 grep（macOS/Linux），固定排除
+        ``.snapshots/`` 与 ``images/files/videos`` 资产目录。返回 ``output``
+        字段为 grep 原始 stdout 风格文本，命中行用 ``:`` 分隔，上下文行用
+        ``-`` 分隔，跨文件命中块用 ``--`` 分隔。
+
+        Args:
+            pattern: 搜索模式（固定字符串或扩展正则）
+            path: 搜索范围，wiki 内子树路径，默认 ``/`` 全 wiki
+            is_regex: True=按扩展正则匹配（-E），False=固定字符串（-F）
+            case_sensitive: True=大小写敏感，False=忽略大小写（-i）
+            whole_word: True=词边界匹配（-w）
+            context: 上下文行数（-C），默认 0 不带上下文
+            max_results: 返回输出行数上限，超出则截断并标记 truncated
+
+        Returns:
+            JSON 字符串，含 status/pattern/scope/total_matches/returned_matches/
+            truncated/output 字段；错误时返回 ``{"status":"error","message":...}``
+        """
+        if not pattern:
+            return _error_json("pattern 不能为空")
+
+        safe_path = sanitize_path(path)
+        search_root = self.wiki_root / safe_path.lstrip("/")
+        try:
+            search_root = search_root.resolve()
+        except OSError:
+            return _error_json(f"无效路径: {path}")
+
+        if not str(search_root).startswith(str(self.wiki_root)):
+            return _error_json(f"路径不在记忆目录下: {path}")
+
+        if not search_root.exists():
+            return _error_json(f"路径不存在: {path}")
+
+        if not search_root.is_dir():
+            return _error_json(f"路径不是目录: {path}")
+
+        cmd = [
+            "grep", "-r", "-n", "--color=never",
+            "--include=*.md",
+            "--exclude-dir=.snapshots",
+            "--exclude-dir=images",
+            "--exclude-dir=files",
+            "--exclude-dir=videos",
+        ]
+        if not case_sensitive:
+            cmd.append("-i")
+        if whole_word:
+            cmd.append("-w")
+        cmd.append("-E" if is_regex else "-F")
+        if context > 0:
+            cmd += ["-C", str(context)]
+        cmd.append("--")
+        cmd.append(pattern)
+        cmd.append("." if not safe_path.lstrip("/") else "./" + safe_path.lstrip("/"))
+
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=str(self.wiki_root),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired:
+            return _error_json("搜索超时")
+        except OSError as e:
+            return _error_json(f"执行 grep 失败: {e}")
+
+        if proc.returncode == 2:
+            err_msg = proc.stderr.strip() or "grep 执行错误"
+            return _error_json(f"grep 错误: {err_msg}")
+
+        lines = proc.stdout.splitlines() if proc.stdout else []
+        normalized_lines = [
+            "/" + line[2:] if line.startswith("./") else line for line in lines
+        ]
+
+        total_matches = len(normalized_lines)
+        truncated = total_matches > max_results
+        returned_lines = normalized_lines[:max_results]
+
+        logger.debug(
+            f"search_memory: pattern={pattern!r}, scope={path}, "
+            f"total={total_matches}, returned={len(returned_lines)}"
+        )
+
+        return json.dumps(
+            {
+                "status": "ok",
+                "pattern": pattern,
+                "scope": path,
+                "total_matches": total_matches,
+                "returned_matches": len(returned_lines),
+                "truncated": truncated,
+                "output": "\n".join(returned_lines),
             },
             ensure_ascii=False,
         )

@@ -109,6 +109,7 @@ remote 模式（需 openmem 服务端以 `openmem --remote` 启动，需 Bearer 
 | `write_memory`  | `content`, `path?`, `tags?`, `summary?` | 覆盖写入记忆；path 为空时返回 `need_path` 提示；路径首段为 `images/files/videos` 时报错；更新前自动快照；缺目录自动创建；summary 为空时自动生成；路径以 `/summary` 结尾时强制 `type=directory_summary` 且正文清空（用于生成目录元数据） |
 | `write_asset`   | `source`, `path`, `filename`, `type?`, `overwrite?` | 写入二进制资产到 `images/files/videos` 目录；`type` 默认 `files`               |
 | `read_asset`    | `path`                                  | 读取资产元信息（绝对路径、相对路径、文件大小）                                          |
+| `search_memory` | `pattern`, `path?`, `is_regex?`, `case_sensitive?`, `whole_word?`, `context?`, `max_results?` | 在记忆中检索包含指定模式的页面，对齐 `grep -r -n` 行为；默认固定字符串(-F)、忽略大小写(-i)；固定排除 `.snapshots/` 与 `images/files/videos` 资产目录；返回 `output` 字段为 grep 原始 stdout 风格文本（命中行 `:` 分隔，上下文行 `-` 分隔，跨文件命中块 `--` 分隔），路径前缀统一为 `/`；`max_results` 按输出行数截断，超出标记 `truncated=true`；仅支持 macOS/Linux（依赖系统 grep） |
 
 ## 权限认证
 
@@ -128,11 +129,11 @@ remote 模式（需 openmem 服务端以 `openmem --remote` 启动，需 Bearer 
 
 `write_memory` / `write_asset` 通过 `@mcp.tool(auth=require_admin_role)` 注册 auth check（`openmem/auth.py`），该 check 读取 `AccessToken.claims["role"]`，仅 admin 返回 True。stdio 传输由 FastMCP `_get_auth_context` 的 `skip_auth=True` 自动跳过所有 auth check，即本地模式全权放行。
 
-| 角色 | get_directory | read_memory | read_asset | write_memory | write_asset | tools/list 可见写工具 |
-| --- |:---:|:---:|:---:|:---:|:---:|:---:|
-| admin | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| user | ✓ | ✓ | ✓ | ✗ | ✗ | ✗（listing 阶段即隐藏） |
-| 无 Key / 无效 Key（remote） | — 协议层 401 拒绝 — | | | | | |
+| 角色 | get_directory | read_memory | read_asset | search_memory | write_memory | write_asset | tools/list 可见写工具 |
+| --- |:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| admin | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| user | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗（listing 阶段即隐藏） |
+| 无 Key / 无效 Key（remote） | — 协议层 401 拒绝 — | | | | | | |
 
 > user 调用写工具时，FastMCP 协议层返回"工具不存在"错误（非 forbidden JSON），LLM 客户端会将其视为工具不可用。
 
@@ -171,7 +172,7 @@ remote 模式（需 openmem 服务端以 `openmem --remote` 启动，需 Bearer 
 1. **admin key**：优先读环境变量 `OPENMEM_ADMIN_API_KEY`，无则生成 `om_<32hex>` 随机 Key
 2. **user key**：优先读环境变量 `OPENMEM_USER_API_KEY`，无则生成 `om_<32hex>` 随机 Key
 
-本次生成的 Key 在控制台**一次性打印**（环境变量来源的不打印，因用户已知）。user 角色 Key 仅可调用只读工具（`get_directory` / `read_memory` / `read_asset`），可直接配置到只读客户端，免去手动调 `/auth/grant` 端点。
+本次生成的 Key 在控制台**一次性打印**（环境变量来源的不打印，因用户已知）。user 角色 Key 仅可调用只读工具（`get_directory` / `read_memory` / `read_asset` / `search_memory`），可直接配置到只读客户端，免去手动调 `/auth/grant` 端点。
 
 ### 认证服务（grant 端点）
 
@@ -215,7 +216,7 @@ Content-Type: application/json
 
 **核心规则**
 
-- **只签发 user 角色**：永不签发 admin，申请到的 Key 仅可调用只读工具（`get_directory` / `read_memory` / `read_asset`）
+- **只签发 user 角色**：永不签发 admin，申请到的 Key 仅可调用只读工具（`get_directory` / `read_memory` / `read_asset` / `search_memory`）
 - **幂等**：同一 `applicantCode` 再次请求返回**同一个** Key，不签发新 Key（`applicantCode` 作为幂等键写入 users.json）
 - **凭证不校验**：`applicantCode` 由内部系统发送，端点当前不校验合法性（信任内网/本机调用方）；凭证校验逻辑封装在 `validate_applicant()` 钩子函数中，联调期改规则只动这一处
 - **字段透传**：请求体用 Pydantic `extra="allow"`，联调期追加的字段不报错、不丢失
@@ -413,7 +414,7 @@ pytest tests/ -v
 | --------------------- | ------- | ----------------------------------- |
 | `test_utils.py`       | 工具函数    | 路径校验、合并、Front Matter 等              |
 | `test_initializer.py` | 初始化     | 配置/Wiki/核心提示词创建                     |
-| `test_store.py`       | 存储层     | WikiStore 读写、快照                     |
+| `test_store.py`       | 存储层     | WikiStore 读写、快照、grep 检索（TestSearchMemory）                     |
 | `test_auth.py`        | 认证权限    | ApiKeyAuth / UserStore / 权限矩阵 / 首次引导 |
 | `test_auth_service.py`| 认证服务    | GrantRequest / grant_user_key 幂等发证 / grant 端点契约 / 端到端权限 |
 | `test_tool_visibility.py` | tools/list 可见性 | RoleFilteredMCP 按角色过滤 listing / require_admin 纵深防御 |
@@ -429,13 +430,24 @@ openmem/
 ├── initializer.py    # 启动初始化：配置文件、Wiki 根目录、users.json 引导
 ├── auth.py           # API Key 认证：ApiKeyAuth / UserStore / 权限矩阵 / require_admin_role AuthCheck
 ├── auth_service.py   # 认证服务：grant 端点逻辑（GrantRequest / grant_user_key / 幂等发证）
-├── store.py          # WikiStore：目录导航、页面读写、快照管理
+├── store.py          # WikiStore：目录导航、页面读写、快照管理、grep 检索（search_memory）
 └── utils.py          # 工具函数：路径校验、Front Matter、合并策略
 ```
 
 
 
 ## 版本历史
+
+### v2.6.0 — grep 检索工具
+
+- 新增 `search_memory` MCP 工具，对齐 `grep -r -n` 行为，支持固定字符串(`-F`)/扩展正则(`-E`)/忽略大小写(`-i`)/词边界(`-w`)/上下文(`-C`)/命中行数截断
+- 通过 `subprocess.run`（列表形式，不用 shell）调用系统 grep，`--` 分隔符防 pattern 被误认为选项；仅支持 macOS/Linux
+- 固定排除 `.snapshots/` 与 `images/files/videos` 资产目录，与接口隔离规则一致；Front Matter 纳入搜索范围
+- 返回 `output` 字段为 grep 原始 stdout 风格文本，路径前缀统一为 `/`（剥掉 `./`），便于 LLM 直接拿结果调 `read_memory`
+- 退出码语义对齐 grep：0=有匹配、1=无匹配（`status="ok"` + `total_matches=0`）、2=参数错/正则非法（`status="error"`）
+- 权限：admin + user 均可调用（与 `get_directory` 同级，不加 `auth=require_admin_role`）
+- `openmem/auth.py` 的 `PERMISSIONS` 字典新增 `search_memory` 条目；`ADMIN_TOOL_NAMES` 自动推导不变
+- `tests/test_store.py` 新增 `TestSearchMemory` 15 条用例；`tests/test_tool_visibility.py` 同步更新读工具集合与权限断言
 
 ### v2.5.1 — 默认 user key 引导
 

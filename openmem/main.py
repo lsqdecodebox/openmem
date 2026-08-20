@@ -175,6 +175,46 @@ def read_asset(path: str) -> str:
     return store.read_asset(path=path)
 
 
+@mcp.tool()
+def search_memory(
+    pattern: str,
+    path: str = "/",
+    is_regex: bool = False,
+    case_sensitive: bool = False,
+    whole_word: bool = False,
+    context: int = 0,
+    max_results: int = 50,
+) -> str:
+    """在记忆中检索包含指定模式的页面，对齐 grep -r -n 行为，即全局记忆检索
+
+    默认固定字符串匹配、忽略大小写；固定排除 .snapshots/ 与 images/files/videos
+    资产目录。返回 output 字段为 grep 原始 stdout 风格文本（命中行用 : 分隔，
+    上下文行用 - 分隔，跨文件命中块用 -- 分隔）。
+
+    Args:
+        pattern: 搜索模式（固定字符串或扩展正则）
+        path: 搜索范围，wiki 内子树路径，默认 / 全 wiki
+        is_regex: True=按扩展正则匹配(-E)，False=固定字符串(-F)
+        case_sensitive: True=大小写敏感，False=忽略大小写(-i)
+        whole_word: True=词边界匹配(-w)
+        context: 上下文行数(-C)，默认 0 不带上下文
+        max_results: 返回输出行数上限，默认 50
+
+    Returns:
+        JSON 字符串，含 status/pattern/scope/total_matches/returned_matches/
+        truncated/output 字段
+    """
+    return store.search_memory(
+        pattern=pattern,
+        path=path,
+        is_regex=is_regex,
+        case_sensitive=case_sensitive,
+        whole_word=whole_word,
+        context=context,
+        max_results=max_results,
+    )
+
+
 # ------------------------------ 认证服务端点 ------------------------------
 # /auth/grant 为 custom_route，不经过 TokenVerifier，可在无 key 时访问。
 # 由 auth.grant.enabled 控制开关；签发的 key 永远是 user 角色，写入 users.json。

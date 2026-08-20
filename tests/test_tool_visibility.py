@@ -79,7 +79,13 @@ class TestPermissionMatrix:
         assert ADMIN_TOOL_NAMES == {"write_memory", "write_asset"}
 
     def test_读工具admin和user都可访问(self):
-        """3 个读工具应有 user 权限（即不加 auth check）"""
-        read_tools = {"get_directory", "read_memory", "read_asset"}
+        """4 个读工具应有 user 权限（即不加 auth check）"""
+        read_tools = {"get_directory", "read_memory", "read_asset", "search_memory"}
         for name in read_tools:
             assert Role.USER in PERMISSIONS[name]
+
+    def test_search_memory非admin独占(self):
+        """search_memory 应同时允许 admin 和 user 访问"""
+        assert Role.ADMIN in PERMISSIONS["search_memory"]
+        assert Role.USER in PERMISSIONS["search_memory"]
+        assert "search_memory" not in ADMIN_TOOL_NAMES

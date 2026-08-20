@@ -720,3 +720,143 @@ class TestReadAsset:
         parsed = json.loads(result)
         assert parsed["status"] == "ok"
         assert parsed["relative_path"] == "videos/02-学习/video.mp4"
+
+
+class TestSearchMemory:
+    """search_memory 工具测试，对齐 grep -r -n 行为。"""
+
+    def setup_method(self):
+        import tempfile
+
+        self.wiki_root = Path(tempfile.mkdtemp())
+        self.store = WikiStore(self.wiki_root, max_depth=7, snapshot_cfg={"enabled": False})
+
+        _create_md(
+            self.wiki_root / "02-学习" / "Python.md",
+            "# Python\n学习 Python 基础\nPython 是动态语言\n",
+            {"title": "Python", "type": "page", "level": 2, "summary": "Python 笔记", "tags": ["学习"]},
+        )
+        _create_md(
+            self.wiki_root / "02-学习" / "Java.md",
+            "# Java\nJava 编程\n",
+            {"title": "Java", "type": "page", "level": 2, "summary": "Java 笔记", "tags": ["学习"]},
+        )
+        _create_md(
+            self.wiki_root / "01-工作" / "Pythonic.md",
+            "# Pythonic\nPythonic 风格\n",
+            {"title": "Pythonic", "type": "page", "level": 2, "summary": "风格说明", "tags": ["工作"]},
+        )
+
+    def _parse(self, result: str) -> dict:
+        return json.loads(result)
+
+    def test_固定串匹配(self):
+        r = self._parse(self.store.search_memory(pattern="Python"))
+        assert r["status"] == "ok"
+        assert r["total_matches"] >= 3
+        assert "/02-学习/Python.md" in r["output"]
+        assert "Python" in r["output"]
+
+    def test_正则匹配(self):
+        r = self._parse(self.store.search_memory(pattern="Py.*on", is_regex=True))
+        assert r["status"] == "ok"
+        assert r["total_matches"] >= 3
+
+    def test_忽略大小写默认(self):
+        r = self._parse(self.store.search_memory(pattern="python"))
+        assert r["status"] == "ok"
+        assert r["total_matches"] >= 3
+
+    def test_大小写敏感(self):
+        r = self._parse(self.store.search_memory(pattern="python", case_sensitive=True))
+        assert r["status"] == "ok"
+        assert r["total_matches"] == 0
+
+    def test_词边界匹配(self):
+        r = self._parse(
+            self.store.search_memory(pattern="Python", whole_word=True, path="/01-工作")
+        )
+        assert r["status"] == "ok"
+        assert r["total_matches"] == 0
+
+        r2 = self._parse(
+            self.store.search_memory(pattern="Python", whole_word=True, path="/02-学习")
+        )
+        assert r2["status"] == "ok"
+        assert r2["total_matches"] >= 3
+
+    def test_上下文输出(self):
+        r = self._parse(
+            self.store.search_memory(pattern="动态语言", context=1, path="/02-学习")
+        )
+        assert r["status"] == "ok"
+        assert r["total_matches"] >= 1
+        lines = r["output"].splitlines()
+        sep_count = sum(1 for l in lines if l.startswith("/02-学习/Python.md-"))
+        assert sep_count >= 1
+
+    def test_路径限定子树(self):
+        r = self._parse(self.store.search_memory(pattern="Python", path="/02-学习"))
+        assert r["status"] == "ok"
+        assert "/01-工作/Pythonic.md" not in r["output"]
+        assert "/02-学习/Python.md" in r["output"]
+
+    def test_跳过资产目录(self):
+        asset_md = self.wiki_root / "images" / "sub" / "a.md"
+        asset_md.parent.mkdir(parents=True, exist_ok=True)
+        asset_md.write_text("# Python in asset\nPython 不应被搜到\n", encoding="utf-8")
+
+        r = self._parse(self.store.search_memory(pattern="Python"))
+        assert r["status"] == "ok"
+        assert "/images/" not in r["output"]
+
+    def test_跳过snapshots(self):
+        snap_md = self.wiki_root / ".snapshots" / "history" / "x" / "2020-01-01T00-00-00.md"
+        snap_md.parent.mkdir(parents=True, exist_ok=True)
+        snap_md.write_text("# Python in snapshot\nPython 不应被搜到\n", encoding="utf-8")
+
+        r = self._parse(self.store.search_memory(pattern="Python"))
+        assert r["status"] == "ok"
+        assert ".snapshots/" not in r["output"]
+
+    def test_max_results截断(self):
+        for i in range(20):
+            _create_md(
+                self.wiki_root / "03-批量" / f"f{i}.md",
+                f"# 文件{i}\nPython match\n",
+                {"title": f"f{i}", "type": "page", "level": 2, "summary": "", "tags": []},
+            )
+        r = self._parse(self.store.search_memory(pattern="Python", max_results=5))
+        assert r["status"] == "ok"
+        assert r["truncated"] is True
+        assert r["returned_matches"] == 5
+        assert r["total_matches"] > 5
+
+    def test_无匹配返回ok(self):
+        r = self._parse(self.store.search_memory(pattern="不存在的关键词XYZ"))
+        assert r["status"] == "ok"
+        assert r["total_matches"] == 0
+        assert r["output"] == ""
+
+    def test_非法正则报错(self):
+        r = self._parse(
+            self.store.search_memory(pattern="[unclosed", is_regex=True)
+        )
+        assert r["status"] == "error"
+        assert "grep" in r["message"] or "正则" in r["message"] or "regex" in r["message"].lower()
+
+    def test_空pattern报错(self):
+        r = self._parse(self.store.search_memory(pattern=""))
+        assert r["status"] == "error"
+        assert "pattern" in r["message"]
+
+    def test_路径不存在报错(self):
+        r = self._parse(self.store.search_memory(pattern="Python", path="/不存在"))
+        assert r["status"] == "error"
+        assert "不存在" in r["message"]
+
+    def test_路径穿越拒绝(self):
+        """path 含 .. 被 sanitize_path 剥除后变为不存在路径，仍应报错。
+        即使侥幸命中 wiki 内目录，搜索也仅在该目录内，不会越界。"""
+        r = self._parse(self.store.search_memory(pattern="Python", path="../../etc"))
+        assert r["status"] == "error"

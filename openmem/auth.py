@@ -27,6 +27,7 @@ PERMISSIONS: dict[str, set[str]] = {
     "get_directory": {Role.ADMIN, Role.USER},
     "read_memory": {Role.ADMIN, Role.USER},
     "read_asset": {Role.ADMIN, Role.USER},
+    "search_memory": {Role.ADMIN, Role.USER},
     "write_memory": {Role.ADMIN},
     "write_asset": {Role.ADMIN},
 }
